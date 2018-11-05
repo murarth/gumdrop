@@ -32,6 +32,11 @@
 //! * `long = "..."` sets the long option name to the given string
 //! * `no_long` prevents a long option from being assigned to the field
 //! * `required` will cause an error if the option is not present
+//! * `multi = "..."` will allow parsing an option multiple times,
+//!   adding each parsed value to the field using the named method.
+//!   This behavior is automatically applied to `Vec<T>` fields, unless the
+//!   `no_multi` option is present.
+//! * `no_multi` will inhibit automatically marking `Vec<T>` fields as `multi`
 //! * `not_required` will cancel a type-level `required` flag (see below).
 //! * `help = "..."` sets help text returned from the `Options::usage` method
 //! * `meta = "..."` sets the meta variable displayed in usage for options
@@ -58,7 +63,7 @@ extern crate syn;
 use std::iter::repeat;
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 
 use quote::{ToTokens};
 use syn::{
@@ -269,7 +274,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
             }
 
             if let Some(last) = free.last() {
-                if last.action == FreeAction::Push {
+                if last.action.is_push() {
                     panic!("only the final `free` option may be of type `Vec<T>`");
                 }
             }
@@ -282,7 +287,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
 
             free.push(FreeOpt{
                 field: ident,
-                action: FreeAction::infer(&field.ty),
+                action: FreeAction::infer(&field.ty, &opts),
                 parse: opts.parse.unwrap_or_default(),
                 required: opts.required,
                 help: opts.help,
@@ -313,7 +318,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
         let action = if opts.count {
             Action::Count
         } else {
-            Action::infer(&field.ty, opts.parse)
+            Action::infer(&field.ty, &opts)
         };
 
         if action.takes_arg() {
@@ -400,10 +405,14 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
     let usage = make_usage(&free, &options);
 
     let handle_free = if !free.is_empty() {
-        let catch_all = if free.last().unwrap().action == FreeAction::Push {
+        let catch_all = if free.last().unwrap().action.is_push() {
             let last = free.pop().unwrap();
 
             let free = last.field;
+            let meth = match last.action {
+                FreeAction::Push(ref meth) => meth,
+                _ => unreachable!()
+            };
 
             let parse = last.parse.make_parse_action();
             let mark_used = last.mark_used();
@@ -411,7 +420,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
             quote!{
                 #mark_used
                 let _arg = _free;
-                _result.#free.push(#parse);
+                _result.#free.#meth(#parse);
             }
         } else {
             quote!{
@@ -428,9 +437,9 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
             let parse = free.parse.make_parse_action();
 
             let assign = match free.action {
-                FreeAction::Push => quote!{
+                FreeAction::Push(ref meth) => quote!{
                     let _arg = _free;
-                    _result.#field.push(#parse);
+                    _result.#field.#meth(#parse);
                 },
                 FreeAction::SetField => quote!{
                     let _arg = _free;
@@ -594,8 +603,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
 enum Action {
     /// Increase count
     Count,
-    /// Push an argument to a `Vec<T>` field
-    Push(ParseMethod),
+    /// Push an argument to a `multi` field using the given method
+    Push(Ident, ParseMethod),
     /// Set field
     SetField(ParseMethod),
     /// Set `Option<T>` field
@@ -608,12 +617,14 @@ enum Action {
 struct AttrOpts {
     long: Option<String>,
     short: Option<char>,
+    multi: Option<Ident>,
     free: bool,
     count: bool,
     help_flag: bool,
     no_help_flag: bool,
     no_short: bool,
     no_long: bool,
+    no_multi: bool,
     required: bool,
     not_required: bool,
     help: Option<String>,
@@ -641,13 +652,13 @@ struct CmdOpts {
 struct DefaultOpts {
     no_help_flag: bool,
     no_long: bool,
+    no_multi: bool,
     no_short: bool,
     required: bool,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
 enum FreeAction {
-    Push,
+    Push(Ident),
     SetField,
     SetOption,
 }
@@ -672,6 +683,7 @@ struct Opt<'a> {
     default: Option<String>,
 }
 
+#[derive(Clone)]
 enum ParseFn {
     Default,
     FromStr(Option<Path>),
@@ -684,41 +696,56 @@ struct ParseMethod {
 }
 
 impl Action {
-    fn infer(ty: &Type, parse: Option<ParseFn>) -> Action {
+    fn infer(ty: &Type, opts: &AttrOpts) -> Action {
         match *ty {
             Type::Path(ref path) => {
                 let path = path.path.segments.last().unwrap().into_value();
                 let param = first_ty_param(ty);
 
                 match &path.ident.to_string()[..] {
-                    "bool" if parse.is_none() => Action::Switch,
-                    "Vec" if param.is_some() => {
+                    "bool" if opts.parse.is_none() => Action::Switch,
+                    "Vec" if !opts.no_multi && param.is_some() => {
                         let tuple_len = tuple_len(param.unwrap());
 
-                        Action::Push(ParseMethod{
-                            parse_fn: parse.unwrap_or_default(),
-                            tuple_len,
-                        })
+                        Action::Push(
+                            Ident::new("push", Span::call_site()),
+                            ParseMethod{
+                                parse_fn: opts.parse.clone().unwrap_or_default(),
+                                tuple_len,
+                            })
                     }
                     "Option" if param.is_some() => {
                         let tuple_len = tuple_len(param.unwrap());
 
                         Action::SetOption(ParseMethod{
-                            parse_fn: parse.unwrap_or_default(),
+                            parse_fn: opts.parse.clone().unwrap_or_default(),
                             tuple_len,
                         })
                     }
-                    _ => Action::SetField(ParseMethod{
-                        parse_fn: parse.unwrap_or_default(),
-                        tuple_len: tuple_len(ty),
-                    })
+                    _ => {
+                        if let Some(ref meth) = opts.multi {
+                            let tuple_len = param.and_then(tuple_len);
+
+                            Action::Push(
+                                meth.clone(),
+                                ParseMethod{
+                                    parse_fn: opts.parse.clone().unwrap_or_default(),
+                                    tuple_len,
+                                })
+                        } else {
+                            Action::SetField(ParseMethod{
+                                parse_fn: opts.parse.clone().unwrap_or_default(),
+                                tuple_len: tuple_len(ty),
+                            })
+                        }
+                    }
                 }
             }
             _ => {
                 let tuple_len = tuple_len(ty);
 
                 Action::SetField(ParseMethod{
-                    parse_fn: parse.unwrap_or_default(),
+                    parse_fn: opts.parse.clone().unwrap_or_default(),
                     tuple_len,
                 })
             }
@@ -729,9 +756,9 @@ impl Action {
         use self::Action::*;
 
         match *self {
-            Push(ref meth) |
-            SetField(ref meth) |
-            SetOption(ref meth) => meth.takes_arg(),
+            Push(_, ref parse) |
+            SetField(ref parse) |
+            SetOption(ref parse) => parse.takes_arg(),
             _ => false
         }
     }
@@ -740,9 +767,9 @@ impl Action {
         use self::Action::*;
 
         match *self {
-            Push(ref meth) |
-            SetField(ref meth) |
-            SetOption(ref meth) => meth.tuple_len,
+            Push(_, ref parse) |
+            SetField(ref parse) |
+            SetOption(ref parse) => parse.tuple_len,
             _ => None
         }
     }
@@ -753,6 +780,7 @@ impl AttrOpts {
         if self.command {
             if self.free { panic!("`command` and `free` are mutually exclusive"); }
             if self.default.is_some() { panic!("`command` and `default` are mutually exclusive"); }
+            if self.multi.is_some() { panic!("`command` and `multi` are mutually exclusive"); }
             if self.long.is_some() { panic!("`command` and `long` are mutually exclusive"); }
             if self.short.is_some() { panic!("`command` and `short` are mutually exclusive"); }
             if self.count { panic!("`command` and `count` are mutually exclusive"); }
@@ -760,6 +788,7 @@ impl AttrOpts {
             if self.no_help_flag { panic!("`command` and `no_help_flag` are mutually exclusive"); }
             if self.no_short { panic!("`command` and `no_short` are mutually exclusive"); }
             if self.no_long { panic!("`command` and `no_long` are mutually exclusive"); }
+            if self.no_multi { panic!("`command` and `no_multi` are mutually exclusive"); }
             if self.help.is_some() { panic!("`command` and `help` are mutually exclusive"); }
             if self.meta.is_some() { panic!("`command` and `meta` are mutually exclusive"); }
         }
@@ -774,6 +803,10 @@ impl AttrOpts {
             if self.no_short { panic!("`free` and `no_short` are mutually exclusive"); }
             if self.no_long { panic!("`free` and `no_long` are mutually exclusive"); }
             if self.meta.is_some() { panic!("`free` and `meta` are mutually exclusive"); }
+        }
+
+        if self.multi.is_some() && self.no_multi {
+            panic!("`multi` and `no_multi` are mutually exclusive");
         }
 
         if self.help_flag && self.no_help_flag {
@@ -838,6 +871,7 @@ impl AttrOpts {
                         "no_help_flag" => self.no_help_flag = true,
                         "no_short" => self.no_short = true,
                         "no_long" => self.no_long = true,
+                        "no_multi" => self.no_multi = true,
                         "required" => self.required = true,
                         "not_required" => self.not_required = true,
                         _ => panic!("unexpected meta item `{}`", tokens_str(item))
@@ -861,6 +895,10 @@ impl AttrOpts {
                             "short" => self.short = Some(lit_char(&nv.lit)),
                             "help" => self.help = Some(lit_str(&nv.lit)),
                             "meta" => self.meta = Some(lit_str(&nv.lit)),
+                            "multi" => {
+                                let name = parse_str(&lit_str(&nv.lit)).unwrap();
+                                self.multi = Some(name);
+                            }
                             _ => panic!("unexpected meta item `{}`", tokens_str(item))
                         }
                     }
@@ -878,6 +916,9 @@ impl AttrOpts {
         }
         if self.long.is_none() && defaults.no_long {
             self.no_long = true;
+        }
+        if self.multi.is_none() && defaults.no_multi {
+            self.no_multi = true;
         }
 
         if self.not_required {
@@ -956,6 +997,7 @@ impl DefaultOpts {
                                             "no_help_flag" => opts.no_help_flag = true,
                                             "no_short" => opts.no_short = true,
                                             "no_long" => opts.no_long = true,
+                                            "no_multi" => opts.no_multi = true,
                                             "required" => opts.required = true,
                                             _ => panic!("unexpected meta item `{}`", tokens_str(item))
                                         },
@@ -975,18 +1017,32 @@ impl DefaultOpts {
 }
 
 impl FreeAction {
-    fn infer(ty: &Type) -> FreeAction {
+    fn infer(ty: &Type, opts: &AttrOpts) -> FreeAction {
         match *ty {
             Type::Path(ref path) => {
                 let path = path.path.segments.last().unwrap().into_value();
 
                 match &path.ident.to_string()[..] {
                     "Option" => FreeAction::SetOption,
-                    "Vec" => FreeAction::Push,
-                    _ => FreeAction::SetField
+                    "Vec" if !opts.no_multi =>
+                        FreeAction::Push(Ident::new("push", Span::call_site())),
+                    _ => {
+                        if let Some(ref meth) = opts.multi {
+                            FreeAction::Push(meth.clone())
+                        } else {
+                            FreeAction::SetField
+                        }
+                    }
                 }
             }
             _ => FreeAction::SetField,
+        }
+    }
+
+    fn is_push(&self) -> bool {
+        match *self {
+            FreeAction::Push(_) => true,
+            _ => false
         }
     }
 }
@@ -1043,22 +1099,22 @@ impl<'a> Opt<'a> {
             Count => quote!{
                 _result.#field += 1;
             },
-            Push(ref meth) => {
-                let act = meth.make_action_type();
+            Push(ref meth, ref parse) => {
+                let act = parse.make_action_type();
 
                 quote!{
-                    _result.#field.push(#act);
+                    _result.#field.#meth(#act);
                 }
             }
-            SetField(ref meth) => {
-                let act = meth.make_action_type();
+            SetField(ref parse) => {
+                let act = parse.make_action_type();
 
                 quote!{
                     _result.#field = #act;
                 }
             }
-            SetOption(ref meth) => {
-                let act = meth.make_action_type();
+            SetOption(ref parse) => {
+                let act = parse.make_action_type();
 
                 quote!{
                     _result.#field = ::std::option::Option::Some(#act);
@@ -1082,22 +1138,22 @@ impl<'a> Opt<'a> {
         let mark_used = self.mark_used();
 
         let action = match self.action {
-            Push(ref meth) => {
-                let act = meth.make_action_type_arg();
+            Push(ref meth, ref parse) => {
+                let act = parse.make_action_type_arg();
 
                 quote!{
-                    _result.#field.push(#act);
+                    _result.#field.#meth(#act);
                 }
             }
-            SetField(ref meth) => {
-                let act = meth.make_action_type_arg();
+            SetField(ref parse) => {
+                let act = parse.make_action_type_arg();
 
                 quote!{
                     _result.#field = #act;
                 }
             }
-            SetOption(ref meth) => {
-                let act = meth.make_action_type_arg();
+            SetOption(ref parse) => {
+                let act = parse.make_action_type_arg();
 
                 quote!{
                     _result.#field = ::std::option::Option::Some(#act);

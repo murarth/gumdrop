@@ -972,3 +972,73 @@ fn test_default_parse() {
     let opts = Opts::parse_args_default(EMPTY).unwrap();
     assert_eq!(opts.foo, Foo(1));
 }
+
+#[test]
+fn test_multi() {
+    use std::collections::VecDeque;
+
+    #[derive(Options)]
+    struct Opts {
+        #[options(multi = "push_back")]
+        foo: VecDeque<String>,
+    }
+
+    #[derive(Options)]
+    struct Opts2 {
+        #[options(multi = "push_back")]
+        foo: VecDeque<(i32, i32)>,
+    }
+
+    #[derive(Options)]
+    struct Opts3 {
+        #[options(free, multi = "push_front")]
+        free: VecDeque<i32>,
+    }
+
+    let opts = Opts::parse_args_default(&["-f", "foo", "-f", "bar"]).unwrap();
+    assert_eq!(opts.foo, ["foo", "bar"]);
+
+    let opts = Opts2::parse_args_default(&["-f", "1", "2", "-f", "3", "4"]).unwrap();
+    assert_eq!(opts.foo, [(1, 2), (3, 4)]);
+
+    let opts = Opts3::parse_args_default(&["1", "2", "3"]).unwrap();
+    assert_eq!(opts.free, [3, 2, 1]);
+}
+
+#[test]
+fn test_no_multi() {
+    #[derive(Options)]
+    struct Opts {
+        #[options(no_multi, parse(from_str = "comma_list"))]
+        list_things: Vec<String>,
+    }
+
+    #[derive(Options)]
+    #[options(no_multi)]
+    struct Opts2 {
+        #[options(parse(from_str = "comma_list"))]
+        list_things: Vec<String>,
+    }
+
+    #[derive(Options)]
+    struct Opts3 {
+        #[options(free, no_multi, parse(from_str = "comma_list"))]
+        list_things: Vec<String>,
+    }
+
+    fn comma_list(s: &str) -> Vec<String> {
+        s.split(',').map(|s| s.to_string()).collect()
+    }
+
+    let opts = Opts::parse_args_default(&["-l", "foo,bar,baz"]).unwrap();
+    assert_eq!(opts.list_things, ["foo", "bar", "baz"]);
+
+    let opts = Opts2::parse_args_default(&["-l", "foo,bar,baz"]).unwrap();
+    assert_eq!(opts.list_things, ["foo", "bar", "baz"]);
+
+    let opts = Opts3::parse_args_default(&["foo,bar,baz"]).unwrap();
+    assert_eq!(opts.list_things, ["foo", "bar", "baz"]);
+
+    is_err!(Opts3::parse_args_default(&["foo,bar,baz", "error"]),
+        "unexpected free argument `error`");
+}
