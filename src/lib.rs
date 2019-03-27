@@ -204,6 +204,10 @@ pub fn parse_args_default<T: Options>(args: &[String]) -> Result<T, Error> {
 /// `stdout` and the process will exit with status code `0`.
 ///
 /// Otherwise, the parsed options are returned.
+///
+/// # Panics
+///
+/// If any argument to the process is not valid unicode.
 pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
     T::parse_args_or_exit(style)
 }
@@ -217,6 +221,10 @@ pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
 /// `stdout` and the process will exit with status code `0`.
 ///
 /// Otherwise, the parsed options are returned.
+///
+/// # Panics
+///
+/// If any argument to the process is not valid unicode.
 pub fn parse_args_default_or_exit<T: Options>() -> T {
     T::parse_args_default_or_exit()
 }
