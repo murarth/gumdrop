@@ -39,7 +39,9 @@
 //!   `no_multi` option is present.
 //! * `no_multi` will inhibit automatically marking `Vec<T>` fields as `multi`
 //! * `not_required` will cancel a type-level `required` flag (see below).
-//! * `help = "..."` sets help text returned from the `Options::usage` method
+//! * `help = "..."` sets help text returned from the `Options::usage` method;
+//!   field doc comment may also be provided to set the help text.
+//!   If both are present, the `help` attribute value is used.
 //! * `meta = "..."` sets the meta variable displayed in usage for options
 //!   which accept an argument
 //! * `parse(...)` uses a named function to parse a value from a string.
@@ -50,9 +52,15 @@
 //!     * `parse(from_str)` uses `std::convert::From::from`
 //!     * `parse(try_from_str)` uses `std::str::FromStr::from_str`
 //!
-//! `#[options(...)]` may also be added at the type level. Only the flags
-//! `no_help_flag`, `no_long`, `no_short`, and `required`
-//! are supported at the type level.
+//! The `options` attribute may also be added at the type level.
+//!
+//! The `help` attribute (or a type-level doc comment) can be used to provide
+//! some introductory text which will precede option help text in the usage
+//! string.
+//!
+//! Additionally, the following flags may be set at the type level to establish
+//! default values for all contained fields: `no_help_flag`, `no_long`,
+//! `no_short`, and `required`.
 
 #![recursion_limit = "1024"]
 
@@ -115,7 +123,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum) -> TokenStream {
         commands.push(Cmd{
             name: opts.name.unwrap_or_else(
                 || make_command_name(&var_name.to_string())),
-            help: opts.help,
+            help: opts.help.or(opts.doc),
             variant_name: var_name,
             ty: ty,
         });
@@ -291,7 +299,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                 action: FreeAction::infer(&field.ty, &opts),
                 parse: opts.parse.unwrap_or_default(),
                 required: opts.required,
-                help: opts.help,
+                help: opts.help.or(opts.doc),
             });
 
             continue;
@@ -333,13 +341,13 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
         options.push(Opt{
             field: ident,
             action: action,
-            long: opts.long.take(),
+            long: opts.long,
             short: opts.short,
             no_short: opts.no_short,
             required: opts.required,
-            meta: opts.meta.take(),
-            help: opts.help.take(),
-            default: opts.default.take(),
+            meta: opts.meta,
+            help: opts.help.or(opts.doc),
+            default: opts.default,
         });
     }
 
@@ -403,7 +411,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
     }
 
     let name = &ast.ident;
-    let usage = make_usage(&free, &options);
+    let opts_help = default_opts.help.or(default_opts.doc);
+    let usage = make_usage(&opts_help, &free, &options);
 
     let handle_free = if !free.is_empty() {
         let catch_all = if free.last().unwrap().action.is_push() {
@@ -630,6 +639,7 @@ struct AttrOpts {
     no_multi: bool,
     required: bool,
     not_required: bool,
+    doc: Option<String>,
     help: Option<String>,
     meta: Option<String>,
     parse: Option<ParseFn>,
@@ -648,6 +658,7 @@ struct Cmd<'a> {
 #[derive(Default)]
 struct CmdOpts {
     name: Option<String>,
+    doc: Option<String>,
     help: Option<String>,
 }
 
@@ -658,6 +669,8 @@ struct DefaultOpts {
     no_multi: bool,
     no_short: bool,
     required: bool,
+    doc: Option<String>,
+    help: Option<String>,
 }
 
 enum FreeAction {
@@ -837,18 +850,31 @@ impl AttrOpts {
         let mut opts = AttrOpts::default();
 
         for attr in attrs {
-            if is_outer(attr.style) && path_eq(&attr.path, "options") {
-                let meta = attr.interpret_meta().unwrap_or_else(
-                    || panic!("invalid attribute: {}", tokens_str(attr)));
+            if is_outer(attr.style) {
+                if path_eq(&attr.path, "doc") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
 
-                match meta {
-                    Meta::Word(_) =>
-                        panic!("#[options] is not a valid attribute"),
-                    Meta::NameValue(..) =>
-                        panic!("#[options = ...] is not a valid attribute"),
-                    Meta::List(ref items) => {
-                        for item in &items.nested {
-                            opts.parse_item(item);
+                    if let Meta::NameValue(nv) = meta {
+                        let doc = lit_str(&nv.lit);
+
+                        if opts.doc.is_none() {
+                            opts.doc = Some(doc.trim_start().to_owned());
+                        }
+                    }
+                } else if path_eq(&attr.path, "options") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
+
+                    match meta {
+                        Meta::Word(_) =>
+                            panic!("#[options] is not a valid attribute"),
+                        Meta::NameValue(..) =>
+                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::List(ref items) => {
+                            for item in &items.nested {
+                                opts.parse_item(item);
+                            }
                         }
                     }
                 }
@@ -937,29 +963,42 @@ impl CmdOpts {
         let mut opts = CmdOpts::default();
 
         for attr in attrs {
-            if is_outer(attr.style) && path_eq(&attr.path, "options") {
-                let meta = attr.interpret_meta().unwrap_or_else(
-                    || panic!("invalid attribute: {}", tokens_str(attr)));
+            if is_outer(attr.style) {
+                if path_eq(&attr.path, "doc") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
 
-                match meta {
-                    Meta::Word(_) =>
-                        panic!("#[options] is not a valid attribute"),
-                    Meta::NameValue(..) =>
-                        panic!("#[options = ...] is not a valid attribute"),
-                    Meta::List(ref items) => {
-                        for item in &items.nested {
-                            match *item {
-                                NestedMeta::Literal(_) =>
-                                    panic!("unexpected meta item `{}`", tokens_str(item)),
-                                NestedMeta::Meta(ref item) => {
-                                    match *item {
-                                        Meta::Word(_) | Meta::List(..) =>
-                                            panic!("unexpected meta item `{}`", tokens_str(item)),
-                                        Meta::NameValue(ref nv) => {
-                                            match &nv.ident.to_string()[..] {
-                                                "name" => opts.name = Some(lit_str(&nv.lit)),
-                                                "help" => opts.help = Some(lit_str(&nv.lit)),
-                                                _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                    if let Meta::NameValue(nv) = meta {
+                        let doc = lit_str(&nv.lit);
+
+                        if opts.doc.is_none() {
+                            opts.doc = Some(doc.trim_start().to_owned());
+                        }
+                    }
+                } else if path_eq(&attr.path, "options") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
+
+                    match meta {
+                        Meta::Word(_) =>
+                            panic!("#[options] is not a valid attribute"),
+                        Meta::NameValue(..) =>
+                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::List(ref items) => {
+                            for item in &items.nested {
+                                match *item {
+                                    NestedMeta::Literal(_) =>
+                                        panic!("unexpected meta item `{}`", tokens_str(item)),
+                                    NestedMeta::Meta(ref item) => {
+                                        match *item {
+                                            Meta::Word(_) | Meta::List(..) =>
+                                                panic!("unexpected meta item `{}`", tokens_str(item)),
+                                            Meta::NameValue(ref nv) => {
+                                                match &nv.ident.to_string()[..] {
+                                                    "name" => opts.name = Some(lit_str(&nv.lit)),
+                                                    "help" => opts.help = Some(lit_str(&nv.lit)),
+                                                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                                                }
                                             }
                                         }
                                     }
@@ -980,32 +1019,51 @@ impl DefaultOpts {
         let mut opts = DefaultOpts::default();
 
         for attr in attrs {
-            if is_outer(attr.style) && path_eq(&attr.path, "options") {
-                let meta = attr.interpret_meta().unwrap_or_else(
-                    || panic!("invalid attribute: {}", tokens_str(attr)));
+            if is_outer(attr.style) {
+                if path_eq(&attr.path, "doc") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
 
-                match meta {
-                    Meta::Word(_) =>
-                        panic!("#[options] is not a valid attribute"),
-                    Meta::NameValue(..) =>
-                        panic!("#[options = ...] is not a valid attribute"),
-                    Meta::List(ref items) => {
-                        for item in &items.nested {
-                            match *item {
-                                NestedMeta::Literal(_) =>
-                                    panic!("unexpected meta item `{}`", tokens_str(item)),
-                                NestedMeta::Meta(ref item) => {
-                                    match *item {
-                                        Meta::Word(ref w) => match &w.to_string()[..] {
-                                            "no_help_flag" => opts.no_help_flag = true,
-                                            "no_short" => opts.no_short = true,
-                                            "no_long" => opts.no_long = true,
-                                            "no_multi" => opts.no_multi = true,
-                                            "required" => opts.required = true,
-                                            _ => panic!("unexpected meta item `{}`", tokens_str(item))
-                                        },
-                                        Meta::List(..) | Meta::NameValue(..) =>
-                                            panic!("unexpected meta item `{}`", tokens_str(item)),
+                    if let Meta::NameValue(nv) = meta {
+                        let doc = lit_str(&nv.lit);
+
+                        if opts.doc.is_none() {
+                            opts.doc = Some(doc.trim_start().to_owned());
+                        }
+                    }
+                } else if path_eq(&attr.path, "options") {
+                    let meta = attr.interpret_meta().unwrap_or_else(
+                        || panic!("invalid attribute: {}", tokens_str(attr)));
+
+                    match meta {
+                        Meta::Word(_) =>
+                            panic!("#[options] is not a valid attribute"),
+                        Meta::NameValue(..) =>
+                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::List(ref items) => {
+                            for item in &items.nested {
+                                match *item {
+                                    NestedMeta::Literal(_) =>
+                                        panic!("unexpected meta item `{}`", tokens_str(item)),
+                                    NestedMeta::Meta(ref item) => {
+                                        match *item {
+                                            Meta::Word(ref w) => match &w.to_string()[..] {
+                                                "no_help_flag" => opts.no_help_flag = true,
+                                                "no_short" => opts.no_short = true,
+                                                "no_long" => opts.no_long = true,
+                                                "no_multi" => opts.no_multi = true,
+                                                "required" => opts.required = true,
+                                                _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                                            },
+                                            Meta::NameValue(ref nv) => {
+                                                match &nv.ident.to_string()[..] {
+                                                    "help" => opts.help = Some(lit_str(&nv.lit)),
+                                                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                                                }
+                                            }
+                                            Meta::List(..) =>
+                                                panic!("unexpected meta item `{}`", tokens_str(item)),
+                                        }
                                     }
                                 }
                             }
@@ -1501,8 +1559,13 @@ fn make_meta(name: &str, action: &Action) -> String {
     name
 }
 
-fn make_usage(free: &[FreeOpt], opts: &[Opt]) -> String {
+fn make_usage(help: &Option<String>, free: &[FreeOpt], opts: &[Opt]) -> String {
     let mut res = String::new();
+
+    if let Some(help) = help {
+        res.push_str(help);
+        res.push_str("\n\n");
+    }
 
     let width = max_width(free, |opt| opt.width())
         .max(max_width(opts, |opt| opt.width()));

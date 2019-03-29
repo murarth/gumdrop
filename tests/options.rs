@@ -1067,3 +1067,46 @@ fn test_no_multi() {
     is_err!(Opts3::parse_args_default(&["foo,bar,baz", "error"]),
         "unexpected free argument `error`");
 }
+
+#[test]
+fn test_doc_help() {
+    /// type-level help comment
+    #[derive(Options)]
+    struct Opts {
+        /// free help comment
+        #[options(free)]
+        free: i32,
+        /// help comment
+        foo: i32,
+        /// help comment
+        #[options(help = "help attribute")]
+        bar: i32,
+    }
+
+    #[derive(Options)]
+    enum Cmd {
+        /// help comment
+        Alpha(NoOpts),
+        /// help comment
+        #[options(help = "help attribute")]
+        Bravo(NoOpts),
+    }
+
+    assert_eq!(Opts::usage(), &"
+type-level help comment
+
+Positional arguments:
+  free           free help comment
+
+Optional arguments:
+  -f, --foo FOO  help comment
+  -b, --bar BAR  help attribute"
+        // Skip leading newline
+        [1..]);
+
+    assert_eq!(Cmd::usage(), &"
+  alpha  help comment
+  bravo  help attribute"
+        // Skip leading newline
+        [1..]);
+}
