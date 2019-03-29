@@ -409,10 +409,6 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
     }
 
     /// Returns the next option or `None` if no options remain.
-    ///
-    /// If the previous option had an explicit argument, e.g. `--option=argument`,
-    /// which was not consumed by a call to `next_arg()`, an error will be
-    /// returned indicating that the argument was ignored.
     pub fn next_opt(&mut self) -> Option<Opt<'a>> {
         if let Some(mut cur) = self.cur.take() {
             if let Some(opt) = cur.next() {
