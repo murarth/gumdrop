@@ -855,6 +855,31 @@ fn test_required() {
 }
 
 #[test]
+fn test_required_help() {
+    #[derive(Options)]
+    struct Opts {
+        #[options(required)]
+        thing: Option<String>,
+        help: bool,
+    }
+
+    #[derive(Options)]
+    struct Opts2 {
+        #[options(required)]
+        thing: Option<String>,
+        help: bool,
+        #[options(help_flag)]
+        secondary_help: bool,
+    }
+
+    let opts = Opts::parse_args_default(&["-h"]).unwrap();
+    assert_eq!(opts.help, true);
+
+    let opts = Opts2::parse_args_default(&["--secondary-help"]).unwrap();
+    assert_eq!(opts.secondary_help, true);
+}
+
+#[test]
 fn test_parse() {
     #[derive(Options)]
     struct Opts {

@@ -31,7 +31,8 @@
 //! * `no_short` prevents a short option from being assigned to the field
 //! * `long = "..."` sets the long option name to the given string
 //! * `no_long` prevents a long option from being assigned to the field
-//! * `required` will cause an error if the option is not present
+//! * `required` will cause an error if the option is not present,
+//!   unless at least one `help_flag` option is also present.
 //! * `multi = "..."` will allow parsing an option multiple times,
 //!   adding each parsed value to the field using the named method.
 //!   This behavior is automatically applied to `Vec<T>` fields, unless the
@@ -563,9 +564,11 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                     }
                 }
 
-                #( if !_used.#required {
-                    return ::std::result::Result::Err(#required_err);
-                } )*
+                if true #( && !_result.#help_flag )* {
+                    #( if !_used.#required {
+                        return ::std::result::Result::Err(#required_err);
+                    } )*
+                }
 
                 ::std::result::Result::Ok(_result)
             }
