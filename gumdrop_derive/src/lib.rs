@@ -919,7 +919,7 @@ impl AttrOpts {
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
             NestedMeta::Literal(lit) =>
-                return Err(Error::new(lit.span(), "unexpected meta item")),
+                return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
                     Meta::Word(w) => match &w.to_string()[..] {
@@ -933,21 +933,18 @@ impl AttrOpts {
                         "no_multi" => self.no_multi = true,
                         "required" => self.required = true,
                         "not_required" => self.not_required = true,
-                        _ => return Err(Error::new(w.span(),
-                            "unexpected meta item"))
+                        _ => return Err(unexpected_meta_item(w.span()))
                     },
                     Meta::List(list) => {
                         match &list.ident.to_string()[..] {
                             "parse" => {
                                 if list.nested.len() != 1 {
-                                    return Err(Error::new(list.ident.span(),
-                                        "unexpected meta item"));
+                                    return Err(unexpected_meta_item(list.ident.span()));
                                 }
 
                                 self.parse = Some(ParseFn::parse(&list.nested[0])?);
                             }
-                            _ => return Err(Error::new(list.ident.span(),
-                                "unexpected meta item"))
+                            _ => return Err(unexpected_meta_item(list.ident.span()))
                         }
                     }
                     Meta::NameValue(nv) => {
@@ -961,8 +958,7 @@ impl AttrOpts {
                                 let name = parse_str(&lit_str(&nv.lit)?)?;
                                 self.multi = Some(name);
                             }
-                            _ => return Err(Error::new(nv.ident.span(),
-                                "unexpected meta item"))
+                            _ => return Err(unexpected_meta_item(nv.ident.span()))
                         }
                     }
                 }
@@ -1036,19 +1032,18 @@ impl CmdOpts {
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
             NestedMeta::Literal(lit) =>
-                return Err(Error::new(lit.span(), "unexpected meta item")),
+                return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
                     Meta::Word(ident) =>
-                        return Err(Error::new(ident.span(), "unexpected meta item")),
+                        return Err(unexpected_meta_item(ident.span())),
                     Meta::List(list) =>
-                        return Err(Error::new(list.ident.span(), "unexpected meta item")),
+                        return Err(unexpected_meta_item(list.ident.span())),
                     Meta::NameValue(nv) => {
                         match &nv.ident.to_string()[..] {
                             "name" => self.name = Some(lit_str(&nv.lit)?),
                             "help" => self.help = Some(lit_str(&nv.lit)?),
-                            _ => return Err(Error::new(nv.ident.span(),
-                                "unexpected meta item"))
+                            _ => return Err(unexpected_meta_item(nv.ident.span()))
                         }
                     }
                 }
@@ -1101,7 +1096,7 @@ impl DefaultOpts {
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
             NestedMeta::Literal(lit) =>
-                return Err(Error::new(lit.span(), "unexpected meta item")),
+                return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
                     Meta::Word(w) => match &w.to_string()[..] {
