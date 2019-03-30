@@ -74,8 +74,8 @@ use std::iter::repeat;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 
-use quote::{ToTokens};
 use syn::{
+    parse::Error, spanned::Spanned,
     Attribute, AttrStyle, Data, DataEnum, DataStruct, DeriveInput, Fields,
     GenericArgument, Ident, Lit, Meta, NestedMeta, Path, PathArguments, Type,
     parse_str,
@@ -83,38 +83,55 @@ use syn::{
 
 #[proc_macro_derive(Options, attributes(options))]
 pub fn derive_options(input: TokenStream) -> TokenStream {
-    let ast: DeriveInput = syn::parse(input).unwrap();
+    let ast: DeriveInput = match syn::parse(input) {
+        Ok(ast) => ast,
+        Err(e) => {
+            return e.to_compile_error().into();
+        }
+    };
 
-    match &ast.data {
+    let span = ast.ident.span();
+
+    let result = match &ast.data {
         Data::Enum(data) =>
             derive_options_enum(&ast, data),
         Data::Struct(DataStruct{fields: Fields::Unit, ..}) =>
-            panic!("cannot derive Options for unit struct types"),
+            Err(Error::new(span, "cannot derive Options for unit struct types")),
         Data::Struct(DataStruct{fields: Fields::Unnamed(..), ..}) =>
-            panic!("cannot derive Options for tuple struct types"),
+            Err(Error::new(span, "cannot derive Options for tuple struct types")),
         Data::Struct(DataStruct{fields, ..}) =>
             derive_options_struct(&ast, fields),
         Data::Union(_) =>
-            panic!("cannot derive Options for union types"),
+            Err(Error::new(span, "cannot derive Options for union types")),
+    };
+
+    match result {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into()
     }
 }
 
-fn derive_options_enum(ast: &DeriveInput, data: &DataEnum) -> TokenStream {
+fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
+        -> Result<TokenStream2, Error> {
     let name = &ast.ident;
     let mut commands = Vec::new();
     let mut var_ty = Vec::new();
 
     for var in &data.variants {
+        let span = var.ident.span();
+
         let ty = match &var.fields {
             Fields::Unit | Fields::Named(_) =>
-                panic!("command variants must be unary tuple variants"),
+                return Err(Error::new(span,
+                    "command variants must be unary tuple variants")),
             Fields::Unnamed(fields) if fields.unnamed.len() != 1 =>
-                panic!("command variants must be unary tuple variants"),
+                return Err(Error::new(span,
+                    "command variants must be unary tuple variants")),
             Fields::Unnamed(fields) =>
                 &fields.unnamed.first().unwrap().into_value().ty,
         };
 
-        let opts = CmdOpts::parse(&var.attrs);
+        let opts = CmdOpts::parse(&var.attrs)?;
 
         let var_name = &var.ident;
 
@@ -167,7 +184,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum) -> TokenStream {
         }
     };
 
-    let expr = quote!{
+    Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
             fn parse<__S: ::std::convert::AsRef<str>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
@@ -216,12 +233,11 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum) -> TokenStream {
                 }
             }
         }
-    };
-
-    expr.to_string().parse().expect("parse quote!")
+    })
 }
 
-fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
+fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
+        -> Result<TokenStream2, Error> {
     let mut pattern = Vec::new();
     let mut handle_opt = Vec::new();
     let mut short_names = Vec::new();
@@ -238,10 +254,12 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
     let mut default = Vec::new();
 
     let default_expr = quote!{ ::std::default::Default::default() };
-    let default_opts = DefaultOpts::parse(&ast.attrs);
+    let default_opts = DefaultOpts::parse(&ast.attrs)?;
 
     for field in fields {
-        let mut opts = AttrOpts::parse(&field.attrs);
+        let span = field.ident.as_ref().unwrap().span();
+
+        let mut opts = AttrOpts::parse(span, &field.attrs)?;
         opts.set_defaults(&default_opts);
 
         let ident = field.ident.as_ref().unwrap();
@@ -258,10 +276,12 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
 
         if opts.command {
             if command.is_some() {
-                panic!("duplicate declaration of `command` field");
+                return Err(Error::new(span,
+                    "duplicate declaration of `command` field"));
             }
             if !free.is_empty() {
-                panic!("`command` and `free` options are mutually exclusive");
+                return Err(Error::new(span,
+                    "`command` and `free` options are mutually exclusive"));
             }
 
             command = Some(ident);
@@ -279,12 +299,14 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
 
         if opts.free {
             if command.is_some() {
-                panic!("`command` and `free` options are mutually exclusive");
+                return Err(Error::new(span,
+                    "`command` and `free` options are mutually exclusive"));
             }
 
             if let Some(last) = free.last() {
                 if last.action.is_push() {
-                    panic!("only the final `free` option may be of type `Vec<T>`");
+                    return Err(Error::new(span,
+                        "only the final `free` option may be of type `Vec<T>`"));
                 }
             }
 
@@ -310,12 +332,12 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
         }
 
         if let Some(long) = &opts.long {
-            validate_long_name(long, &long_names);
+            validate_long_name(span, long, &long_names)?;
             long_names.push(long.clone());
         }
 
         if let Some(short) = opts.short {
-            validate_short_name(short, &short_names);
+            validate_short_name(span, short, &short_names)?;
             short_names.push(short);
         }
 
@@ -335,7 +357,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                 opts.meta = Some(make_meta(&ident.to_string(), &action));
             }
         } else if opts.meta.is_some() {
-            panic!("`meta` value is invalid for option `{}`", ident);
+            return Err(Error::new(span,
+                "`meta` value is invalid for this field"));
         }
 
         options.push(Opt{
@@ -373,7 +396,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                 ::gumdrop::Error::missing_required(#display) });
         }
 
-        let pat = match (opt.long.as_ref(), opt.short) {
+        let pat = match (&opt.long, opt.short) {
             (Some(long), Some(short)) => quote!{
                 ::gumdrop::Opt::Long(#long) | ::gumdrop::Opt::Short(#short)
             },
@@ -384,7 +407,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                 ::gumdrop::Opt::Short(#short)
             },
             (None, None) => {
-                panic!("option `{}` has no long or short flags", opt.field);
+                return Err(Error::new(opt.field.span(),
+                    "option has no long or short flags"));
             }
         };
 
@@ -544,7 +568,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
 
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
-    let expr = quote!{
+    Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
             fn parse<__S: ::std::convert::AsRef<str>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
@@ -607,9 +631,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields) -> TokenStream {
                 #command_usage
             }
         }
-    };
-
-    expr.to_string().parse().expect("parse quote!")
+    })
 }
 
 enum Action {
@@ -792,88 +814,96 @@ impl Action {
 }
 
 impl AttrOpts {
-    fn check(&self) {
+    fn check(&self, span: Span) -> Result<(), Error> {
+        macro_rules! err {
+            ( $($tt:tt)* ) => { {
+                return Err(Error::new(span, $($tt)*));
+            } }
+        }
+
         if self.command {
-            if self.free { panic!("`command` and `free` are mutually exclusive"); }
-            if self.default.is_some() { panic!("`command` and `default` are mutually exclusive"); }
-            if self.multi.is_some() { panic!("`command` and `multi` are mutually exclusive"); }
-            if self.long.is_some() { panic!("`command` and `long` are mutually exclusive"); }
-            if self.short.is_some() { panic!("`command` and `short` are mutually exclusive"); }
-            if self.count { panic!("`command` and `count` are mutually exclusive"); }
-            if self.help_flag { panic!("`command` and `help_flag` are mutually exclusive"); }
-            if self.no_help_flag { panic!("`command` and `no_help_flag` are mutually exclusive"); }
-            if self.no_short { panic!("`command` and `no_short` are mutually exclusive"); }
-            if self.no_long { panic!("`command` and `no_long` are mutually exclusive"); }
-            if self.no_multi { panic!("`command` and `no_multi` are mutually exclusive"); }
-            if self.help.is_some() { panic!("`command` and `help` are mutually exclusive"); }
-            if self.meta.is_some() { panic!("`command` and `meta` are mutually exclusive"); }
+            if self.free { err!("`command` and `free` are mutually exclusive"); }
+            if self.default.is_some() { err!("`command` and `default` are mutually exclusive"); }
+            if self.multi.is_some() { err!("`command` and `multi` are mutually exclusive"); }
+            if self.long.is_some() { err!("`command` and `long` are mutually exclusive"); }
+            if self.short.is_some() { err!("`command` and `short` are mutually exclusive"); }
+            if self.count { err!("`command` and `count` are mutually exclusive"); }
+            if self.help_flag { err!("`command` and `help_flag` are mutually exclusive"); }
+            if self.no_help_flag { err!("`command` and `no_help_flag` are mutually exclusive"); }
+            if self.no_short { err!("`command` and `no_short` are mutually exclusive"); }
+            if self.no_long { err!("`command` and `no_long` are mutually exclusive"); }
+            if self.no_multi { err!("`command` and `no_multi` are mutually exclusive"); }
+            if self.help.is_some() { err!("`command` and `help` are mutually exclusive"); }
+            if self.meta.is_some() { err!("`command` and `meta` are mutually exclusive"); }
         }
 
         if self.free {
-            if self.default.is_some() { panic!("`free` and `default` are mutually exclusive"); }
-            if self.long.is_some() { panic!("`free` and `long` are mutually exclusive"); }
-            if self.short.is_some() { panic!("`free` and `short` are mutually exclusive"); }
-            if self.count { panic!("`free` and `count` are mutually exclusive"); }
-            if self.help_flag { panic!("`free` and `help_flag` are mutually exclusive"); }
-            if self.no_help_flag { panic!("`free` and `no_help_flag` are mutually exclusive"); }
-            if self.no_short { panic!("`free` and `no_short` are mutually exclusive"); }
-            if self.no_long { panic!("`free` and `no_long` are mutually exclusive"); }
-            if self.meta.is_some() { panic!("`free` and `meta` are mutually exclusive"); }
+            if self.default.is_some() { err!("`free` and `default` are mutually exclusive"); }
+            if self.long.is_some() { err!("`free` and `long` are mutually exclusive"); }
+            if self.short.is_some() { err!("`free` and `short` are mutually exclusive"); }
+            if self.count { err!("`free` and `count` are mutually exclusive"); }
+            if self.help_flag { err!("`free` and `help_flag` are mutually exclusive"); }
+            if self.no_help_flag { err!("`free` and `no_help_flag` are mutually exclusive"); }
+            if self.no_short { err!("`free` and `no_short` are mutually exclusive"); }
+            if self.no_long { err!("`free` and `no_long` are mutually exclusive"); }
+            if self.meta.is_some() { err!("`free` and `meta` are mutually exclusive"); }
         }
 
         if self.multi.is_some() && self.no_multi {
-            panic!("`multi` and `no_multi` are mutually exclusive");
+            err!("`multi` and `no_multi` are mutually exclusive");
         }
 
         if self.help_flag && self.no_help_flag {
-            panic!("`help_flag` and `no_help_flag` are mutually exclusive");
+            err!("`help_flag` and `no_help_flag` are mutually exclusive");
         }
 
         if self.no_short && self.short.is_some() {
-            panic!("`no_short` and `short` are mutually exclusive");
+            err!("`no_short` and `short` are mutually exclusive");
         }
 
         if self.no_long && self.long.is_some() {
-            panic!("`no_long` and `long` are mutually exclusive");
+            err!("`no_long` and `long` are mutually exclusive");
         }
 
         if self.required && self.not_required {
-            panic!("`required` and `not_required` are mutually exclusive");
+            err!("`required` and `not_required` are mutually exclusive");
         }
 
         if self.parse.is_some() {
-            if self.count { panic!("`count` and `parse` are mutually exclusive"); }
+            if self.count { err!("`count` and `parse` are mutually exclusive"); }
         }
+
+        Ok(())
     }
 
-    fn parse(attrs: &[Attribute]) -> AttrOpts {
+    fn parse(span: Span, attrs: &[Attribute]) -> Result<AttrOpts, Error> {
         let mut opts = AttrOpts::default();
 
         for attr in attrs {
             if is_outer(attr.style) {
                 if path_eq(&attr.path, "doc") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     if let Meta::NameValue(nv) = meta {
-                        let doc = lit_str(&nv.lit);
+                        let doc = lit_str(&nv.lit)?;
 
                         if opts.doc.is_none() {
                             opts.doc = Some(doc.trim_start().to_owned());
                         }
                     }
                 } else if path_eq(&attr.path, "options") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(_) =>
-                            panic!("#[options] is not a valid attribute"),
-                        Meta::NameValue(..) =>
-                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::Word(ident) =>
+                            return Err(Error::new(ident.span(),
+                                "`#[options]` is not a valid attribute")),
+                        Meta::NameValue(nv) =>
+                            return Err(Error::new(nv.ident.span(),
+                                "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
-                                opts.parse_item(item);
+                                opts.parse_item(item)?;
                             }
                         }
                     }
@@ -881,15 +911,15 @@ impl AttrOpts {
             }
         }
 
-        opts.check();
+        opts.check(span)?;
 
-        opts
+        Ok(opts)
     }
 
-    fn parse_item(&mut self, item: &NestedMeta) {
+    fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
-            NestedMeta::Literal(_) =>
-                panic!("unexpected meta item `{}`", tokens_str(item)),
+            NestedMeta::Literal(lit) =>
+                return Err(Error::new(lit.span(), "unexpected meta item")),
             NestedMeta::Meta(item) => {
                 match item {
                     Meta::Word(w) => match &w.to_string()[..] {
@@ -903,37 +933,43 @@ impl AttrOpts {
                         "no_multi" => self.no_multi = true,
                         "required" => self.required = true,
                         "not_required" => self.not_required = true,
-                        _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                        _ => return Err(Error::new(w.span(),
+                            "unexpected meta item"))
                     },
                     Meta::List(list) => {
                         match &list.ident.to_string()[..] {
                             "parse" => {
                                 if list.nested.len() != 1 {
-                                    panic!("unexpected meta item `{}`", tokens_str(item));
+                                    return Err(Error::new(list.ident.span(),
+                                        "unexpected meta item"));
                                 }
 
-                                self.parse = Some(ParseFn::parse(&list.nested[0]));
+                                self.parse = Some(ParseFn::parse(&list.nested[0])?);
                             }
-                            _ => panic!("unexpected meta item `{}`", tokens_str(item)),
+                            _ => return Err(Error::new(list.ident.span(),
+                                "unexpected meta item"))
                         }
                     }
                     Meta::NameValue(nv) => {
                         match &nv.ident.to_string()[..] {
-                            "default" => self.default = Some(lit_str(&nv.lit)),
-                            "long" => self.long = Some(lit_str(&nv.lit)),
-                            "short" => self.short = Some(lit_char(&nv.lit)),
-                            "help" => self.help = Some(lit_str(&nv.lit)),
-                            "meta" => self.meta = Some(lit_str(&nv.lit)),
+                            "default" => self.default = Some(lit_str(&nv.lit)?),
+                            "long" => self.long = Some(lit_str(&nv.lit)?),
+                            "short" => self.short = Some(lit_char(&nv.lit)?),
+                            "help" => self.help = Some(lit_str(&nv.lit)?),
+                            "meta" => self.meta = Some(lit_str(&nv.lit)?),
                             "multi" => {
-                                let name = parse_str(&lit_str(&nv.lit)).unwrap();
+                                let name = parse_str(&lit_str(&nv.lit)?)?;
                                 self.multi = Some(name);
                             }
-                            _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                            _ => return Err(Error::new(nv.ident.span(),
+                                "unexpected meta item"))
                         }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
     fn set_defaults(&mut self, defaults: &DefaultOpts) {
@@ -959,50 +995,34 @@ impl AttrOpts {
 }
 
 impl CmdOpts {
-    fn parse(attrs: &[Attribute]) -> CmdOpts {
+    fn parse(attrs: &[Attribute]) -> Result<CmdOpts, Error> {
         let mut opts = CmdOpts::default();
 
         for attr in attrs {
             if is_outer(attr.style) {
                 if path_eq(&attr.path, "doc") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     if let Meta::NameValue(nv) = meta {
-                        let doc = lit_str(&nv.lit);
+                        let doc = lit_str(&nv.lit)?;
 
                         if opts.doc.is_none() {
                             opts.doc = Some(doc.trim_start().to_owned());
                         }
                     }
                 } else if path_eq(&attr.path, "options") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(_) =>
-                            panic!("#[options] is not a valid attribute"),
-                        Meta::NameValue(..) =>
-                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::Word(ident) =>
+                            return Err(Error::new(ident.span(),
+                                "`#[options]` is not a valid attribute")),
+                        Meta::NameValue(nv) =>
+                            return Err(Error::new(nv.ident.span(),
+                                "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
-                                match item {
-                                    NestedMeta::Literal(_) =>
-                                        panic!("unexpected meta item `{}`", tokens_str(item)),
-                                    NestedMeta::Meta(item) => {
-                                        match item {
-                                            Meta::Word(_) | Meta::List(..) =>
-                                                panic!("unexpected meta item `{}`", tokens_str(item)),
-                                            Meta::NameValue(nv) => {
-                                                match &nv.ident.to_string()[..] {
-                                                    "name" => opts.name = Some(lit_str(&nv.lit)),
-                                                    "help" => opts.help = Some(lit_str(&nv.lit)),
-                                                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                opts.parse_item(item)?;
                             }
                         }
                     }
@@ -1010,62 +1030,64 @@ impl CmdOpts {
             }
         }
 
-        opts
+        Ok(opts)
+    }
+
+    fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
+        match item {
+            NestedMeta::Literal(lit) =>
+                return Err(Error::new(lit.span(), "unexpected meta item")),
+            NestedMeta::Meta(item) => {
+                match item {
+                    Meta::Word(ident) =>
+                        return Err(Error::new(ident.span(), "unexpected meta item")),
+                    Meta::List(list) =>
+                        return Err(Error::new(list.ident.span(), "unexpected meta item")),
+                    Meta::NameValue(nv) => {
+                        match &nv.ident.to_string()[..] {
+                            "name" => self.name = Some(lit_str(&nv.lit)?),
+                            "help" => self.help = Some(lit_str(&nv.lit)?),
+                            _ => return Err(Error::new(nv.ident.span(),
+                                "unexpected meta item"))
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
 impl DefaultOpts {
-    fn parse(attrs: &[Attribute]) -> DefaultOpts {
+    fn parse(attrs: &[Attribute]) -> Result<DefaultOpts, Error> {
         let mut opts = DefaultOpts::default();
 
         for attr in attrs {
             if is_outer(attr.style) {
                 if path_eq(&attr.path, "doc") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     if let Meta::NameValue(nv) = meta {
-                        let doc = lit_str(&nv.lit);
+                        let doc = lit_str(&nv.lit)?;
 
                         if opts.doc.is_none() {
                             opts.doc = Some(doc.trim_start().to_owned());
                         }
                     }
                 } else if path_eq(&attr.path, "options") {
-                    let meta = attr.interpret_meta().unwrap_or_else(
-                        || panic!("invalid attribute: {}", tokens_str(attr)));
+                    let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(_) =>
-                            panic!("#[options] is not a valid attribute"),
-                        Meta::NameValue(..) =>
-                            panic!("#[options = ...] is not a valid attribute"),
+                        Meta::Word(ident) =>
+                            return Err(Error::new(ident.span(),
+                                "`#[options]` is not a valid attribute")),
+                        Meta::NameValue(nv) =>
+                            return Err(Error::new(nv.ident.span(),
+                                "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
-                                match item {
-                                    NestedMeta::Literal(_) =>
-                                        panic!("unexpected meta item `{}`", tokens_str(item)),
-                                    NestedMeta::Meta(item) => {
-                                        match item {
-                                            Meta::Word(w) => match &w.to_string()[..] {
-                                                "no_help_flag" => opts.no_help_flag = true,
-                                                "no_short" => opts.no_short = true,
-                                                "no_long" => opts.no_long = true,
-                                                "no_multi" => opts.no_multi = true,
-                                                "required" => opts.required = true,
-                                                _ => panic!("unexpected meta item `{}`", tokens_str(item))
-                                            },
-                                            Meta::NameValue(nv) => {
-                                                match &nv.ident.to_string()[..] {
-                                                    "help" => opts.help = Some(lit_str(&nv.lit)),
-                                                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
-                                                }
-                                            }
-                                            Meta::List(..) =>
-                                                panic!("unexpected meta item `{}`", tokens_str(item)),
-                                        }
-                                    }
-                                }
+                                opts.parse_item(item)?;
                             }
                         }
                     }
@@ -1073,7 +1095,36 @@ impl DefaultOpts {
             }
         }
 
-        opts
+        Ok(opts)
+    }
+
+    fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
+        match item {
+            NestedMeta::Literal(lit) =>
+                return Err(Error::new(lit.span(), "unexpected meta item")),
+            NestedMeta::Meta(item) => {
+                match item {
+                    Meta::Word(w) => match &w.to_string()[..] {
+                        "no_help_flag" => self.no_help_flag = true,
+                        "no_short" => self.no_short = true,
+                        "no_long" => self.no_long = true,
+                        "no_multi" => self.no_multi = true,
+                        "required" => self.required = true,
+                        _ => return Err(unexpected_meta_item(w.span()))
+                    },
+                    Meta::NameValue(nv) => {
+                        match &nv.ident.to_string()[..] {
+                            "help" => self.help = Some(lit_str(&nv.lit)?),
+                            _ => return Err(unexpected_meta_item(nv.ident.span()))
+                        }
+                    }
+                    Meta::List(list) =>
+                        return Err(unexpected_meta_item(list.ident.span()))
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1276,30 +1327,34 @@ impl<'a> Opt<'a> {
 }
 
 impl ParseFn {
-    fn parse(item: &NestedMeta) -> ParseFn {
-        match item {
+    fn parse(item: &NestedMeta) -> Result<ParseFn, Error> {
+        let result = match item {
             NestedMeta::Meta(Meta::Word(ident)) => {
                 match &ident.to_string()[..] {
                     "from_str" => ParseFn::FromStr(None),
                     "try_from_str" => ParseFn::Default,
-                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                    _ => return Err(unexpected_meta_item(ident.span()))
                 }
             }
             NestedMeta::Meta(Meta::NameValue(nv)) => {
                 match &nv.ident.to_string()[..] {
                     "from_str" => {
-                        let path = parse_str(&lit_str(&nv.lit)).unwrap();
+                        let path = parse_str(&lit_str(&nv.lit)?)?;
                         ParseFn::FromStr(Some(path))
                     }
                     "try_from_str" => {
-                        let path = parse_str(&lit_str(&nv.lit)).unwrap();
+                        let path = parse_str(&lit_str(&nv.lit)?)?;
                         ParseFn::TryFromStr(path)
                     }
-                    _ => panic!("unexpected meta item `{}`", tokens_str(item))
+                    _ => return Err(unexpected_meta_item(nv.ident.span()))
                 }
             }
-            _ => panic!("unexpected meta item `{}`", tokens_str(item))
-        }
+            NestedMeta::Literal(_) |
+            NestedMeta::Meta(Meta::List(_)) =>
+                return Err(unexpected_meta_item(item.span())),
+        };
+
+        Ok(result)
     }
 
     fn make_parse_action(&self) -> TokenStream2 {
@@ -1426,29 +1481,31 @@ fn is_outer(style: AttrStyle) -> bool {
     }
 }
 
-fn lit_str(lit: &Lit) -> String {
+fn lit_str(lit: &Lit) -> Result<String, Error> {
     match lit {
-        Lit::Str(s) => s.value(),
-        _ => panic!("unexpected literal `{}`", tokens_str(lit))
+        Lit::Str(s) => Ok(s.value()),
+        _ => Err(Error::new(lit.span(), "expected string literal"))
     }
 }
 
-fn lit_char(lit: &Lit) -> char {
+fn lit_char(lit: &Lit) -> Result<char, Error> {
     match lit {
+        Lit::Char(ch) => Ok(ch.value()),
         // Character literals in attributes are not necessarily allowed
         Lit::Str(s) => {
             let s = s.value();
             let mut chars = s.chars();
 
-            let res = chars.next().expect("expected one-char string literal");
-            if chars.next().is_some() {
-                panic!("expected one-char string literal");
-            }
+            let first = chars.next();
+            let second = chars.next();
 
-            res
+            match (first, second) {
+                (Some(ch), None) => Ok(ch),
+                _ => Err(Error::new(lit.span(),
+                    "expected one-character string literal"))
+            }
         }
-        Lit::Char(ch) => ch.value(),
-        _ => panic!("unexpected literal `{}`", tokens_str(lit))
+        _ => Err(Error::new(lit.span(), "expected character literal"))
     }
 }
 
@@ -1461,10 +1518,6 @@ fn path_eq(path: &Path, s: &str) -> bool {
             _ => false
         }
     }
-}
-
-fn tokens_str<T: ToTokens>(t: &T) -> String {
-    t.into_token_stream().to_string()
 }
 
 fn tuple_len(ty: &Type) -> Option<usize> {
@@ -1517,24 +1570,26 @@ fn make_short_name(name: &str, short: &[char]) -> Option<char> {
     }
 }
 
-fn validate_long_name(name: &str, names: &[String]) {
+fn validate_long_name(span: Span, name: &str, names: &[String])
+        -> Result<(), Error> {
     if name.is_empty() || name.starts_with('-') ||
-            name.contains(|ch: char| ch.is_whitespace()) {
-        panic!("`{}` is not a valid long option", name);
-    }
-
-    if names.iter().any(|n| n == name) {
-        panic!("duplicate option name `--{}`", name);
+            name.contains(char::is_whitespace) {
+        Err(Error::new(span, "not a valid long option"))
+    } else if names.iter().any(|n| n == name) {
+        Err(Error::new(span, "duplicate option name"))
+    } else {
+        Ok(())
     }
 }
 
-fn validate_short_name(ch: char, names: &[char]) {
+fn validate_short_name(span: Span, ch: char, names: &[char])
+        -> Result<(), Error> {
     if ch == '-' || ch.is_whitespace() {
-        panic!("`{}` is not a valid short option", ch);
-    }
-
-    if names.contains(&ch) {
-        panic!("duplicate option name `-{}`", ch);
+        Err(Error::new(span, "not a valid short option"))
+    } else if names.contains(&ch) {
+        Err(Error::new(span, "duplicate option name"))
+    } else {
+        Ok(())
     }
 }
 
@@ -1664,4 +1719,8 @@ fn make_cmd_usage(cmds: &[Cmd]) -> String {
     res.pop();
 
     res
+}
+
+fn unexpected_meta_item(span: Span) -> Error {
+    Error::new(span, "unexpected meta item")
 }
