@@ -332,23 +332,23 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ErrorKind::*;
 
-        match self.kind {
-            FailedParse(ref opt, ref arg) => write!(f, "invalid argument to option `{}`: {}", opt, arg),
-            FailedParseDefault{ref option, value, ref err} => write!(f, "invalid default value for `{}` ({:?}): {}", option, value, err),
-            InsufficientArguments{ref option, expected, found} =>
+        match &self.kind {
+            FailedParse(opt, arg) => write!(f, "invalid argument to option `{}`: {}", opt, arg),
+            FailedParseDefault{option, value, err} => write!(f, "invalid default value for `{}` ({:?}): {}", option, value, err),
+            InsufficientArguments{option, expected, found} =>
                 write!(f, "insufficient arguments to option `{}`: expected {}; found {}",
                     option, expected, found),
-            MissingArgument(ref opt) => write!(f, "missing argument to option `{}`", opt),
+            MissingArgument(opt) => write!(f, "missing argument to option `{}`", opt),
             MissingCommand => f.write_str("missing command name"),
-            MissingRequired(ref opt) => write!(f, "missing required option `{}`", opt),
+            MissingRequired(opt) => write!(f, "missing required option `{}`", opt),
             MissingRequiredCommand => f.write_str("missing required command"),
             MissingRequiredFree => f.write_str("missing required free argument"),
-            UnexpectedArgument(ref opt) => write!(f, "option `{}` does not accept an argument", opt),
-            UnexpectedSingleArgument(ref opt, n) =>
+            UnexpectedArgument(opt) => write!(f, "option `{}` does not accept an argument", opt),
+            UnexpectedSingleArgument(opt, n) =>
                 write!(f, "option `{}` expects {} arguments; found 1", opt, n),
-            UnexpectedFree(ref arg) => write!(f, "unexpected free argument `{}`", arg),
-            UnrecognizedCommand(ref cmd) => write!(f, "unrecognized command `{}`", cmd),
-            UnrecognizedLongOption(ref opt) => write!(f, "unrecognized option `--{}`", opt),
+            UnexpectedFree(arg) => write!(f, "unexpected free argument `{}`", arg),
+            UnrecognizedCommand(cmd) => write!(f, "unrecognized command `{}`", cmd),
+            UnrecognizedLongOption(opt) => write!(f, "unrecognized option `--{}`", opt),
             UnrecognizedShortOption(opt) => write!(f, "unrecognized option `-{}`", opt),
         }
     }
