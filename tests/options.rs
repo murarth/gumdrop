@@ -1136,3 +1136,17 @@ fn test_failed_parse_free() {
     is_err!(Opts::parse_args_default(&["0", "0", "x"]),
         |e| e.starts_with("invalid argument to option `baz`: "));
 }
+
+#[test]
+fn test_default_expr() {
+    #[derive(Options)]
+    struct Opts {
+        #[options(default_expr = "foo()")]
+        foo: u32,
+    }
+
+    fn foo() -> u32 { 123 }
+
+    let opts = Opts::parse_args_default(EMPTY).unwrap();
+    assert_eq!(opts.foo, foo());
+}

@@ -31,6 +31,11 @@
 //! * `no_short` prevents a short option from being assigned to the field
 //! * `long = "..."` sets the long option name to the given string
 //! * `no_long` prevents a long option from being assigned to the field
+//! * `default` provides a default value for the option field.
+//!   The value of this field is parsed in the same way as argument values.
+//! * `default_expr` provides a default value for the option field.
+//!   The value of this field is parsed at compile time as a Rust expression
+//!   and is evaluated before any argument values are processed.
 //! * `required` will cause an error if the option is not present,
 //!   unless at least one `help_flag` option is also present.
 //! * `multi = "..."` will allow parsing an option multiple times,
@@ -75,7 +80,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 
 use syn::{
-    parse::Error, spanned::Spanned,
+    parse::Error, spanned::Spanned, Expr,
     Attribute, AttrStyle, Data, DataEnum, DataStruct, DeriveInput, Fields,
     GenericArgument, Ident, Lit, Meta, NestedMeta, Path, PathArguments, Type,
     parse_str,
@@ -270,6 +275,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             default.push(opts.parse.as_ref()
                 .unwrap_or(&ParseFn::Default)
                 .make_parse_default_action(ident, &expr));
+        } else if let Some(expr) = &opts.default_expr {
+            default.push(quote!{ #expr });
         } else {
             default.push(default_expr.clone());
         }
@@ -668,6 +675,7 @@ struct AttrOpts {
     meta: Option<String>,
     parse: Option<ParseFn>,
     default: Option<String>,
+    default_expr: Option<Expr>,
 
     command: bool,
 }
@@ -721,6 +729,8 @@ struct Opt<'a> {
     help: Option<String>,
     meta: Option<String>,
     default: Option<String>,
+    // NOTE: `default_expr` is not contained here
+    // because it is not displayed to the user in usage text
 }
 
 #[derive(Clone)]
@@ -875,6 +885,10 @@ impl AttrOpts {
             if self.count { err!("`count` and `parse` are mutually exclusive"); }
         }
 
+        if self.default.is_some() && self.default_expr.is_some() {
+            err!("`default` and `default_expr` are mutually exclusive");
+        }
+
         Ok(())
     }
 
@@ -952,6 +966,10 @@ impl AttrOpts {
                     Meta::NameValue(nv) => {
                         match &nv.ident.to_string()[..] {
                             "default" => self.default = Some(lit_str(&nv.lit)?),
+                            "default_expr" => {
+                                let expr = parse_str(&lit_str(&nv.lit)?)?;
+                                self.default_expr = Some(expr);
+                            }
                             "long" => self.long = Some(lit_str(&nv.lit)?),
                             "short" => self.short = Some(lit_char(&nv.lit)?),
                             "help" => self.help = Some(lit_str(&nv.lit)?),
