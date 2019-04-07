@@ -247,6 +247,11 @@ impl Error {
         Error{kind: ErrorKind::FailedParseDefault{option, value, err}}
     }
 
+    /// Returns an error for a failed attempt at parsing an option value.
+    pub fn failed_parse_with_name(name: String, err: String) -> Error {
+        Error{kind: ErrorKind::FailedParse(name, err)}
+    }
+
     /// Returns an error for an option expecting two or more arguments not
     /// receiving the expected number of arguments.
     pub fn insufficient_arguments(opt: Opt, expected: usize, found: usize) -> Error {
@@ -496,7 +501,8 @@ pub enum Opt<'a> {
 }
 
 impl<'a> Opt<'a> {
-    fn to_string(&self) -> String {
+    #[doc(hidden)]
+    pub fn to_string(&self) -> String {
         match *self {
             Opt::Short(ch) => format!("-{}", ch),
             Opt::Long(s) => format!("--{}", s),

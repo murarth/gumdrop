@@ -443,12 +443,13 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             let last = free.pop().unwrap();
 
             let free = last.field;
+            let name = free.to_string();
             let meth = match &last.action {
                 FreeAction::Push(meth) => meth,
                 _ => unreachable!()
             };
 
-            let parse = last.parse.make_parse_action();
+            let parse = last.parse.make_parse_action(Some(&name[..]));
             let mark_used = last.mark_used();
 
             quote!{
@@ -466,9 +467,10 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         let num = 0..free.len();
         let action = free.iter().map(|free| {
             let field = free.field;
+            let name = field.to_string();
 
             let mark_used = free.mark_used();
-            let parse = free.parse.make_parse_action();
+            let parse = free.parse.make_parse_action(Some(&name[..]));
 
             let assign = match &free.action {
                 FreeAction::Push(meth) => quote!{
@@ -1352,12 +1354,18 @@ impl ParseFn {
         Ok(result)
     }
 
-    fn make_parse_action(&self) -> TokenStream2 {
+    fn make_parse_action(&self, name: Option<&str>) -> TokenStream2 {
+        let name = if let Some(name) = name {
+            quote!{ ::std::string::ToString::to_string(#name) }
+        } else {
+            quote!{ ::gumdrop::Opt::to_string(&_opt) }
+        };
+
         let res = match self {
             ParseFn::Default => quote!{
                 ::std::str::FromStr::from_str(_arg)
-                    .map_err(|e| ::gumdrop::Error::failed_parse(_opt,
-                        ::std::string::ToString::to_string(&e)))?
+                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                        #name, ::std::string::ToString::to_string(&e)))?
             },
             ParseFn::FromStr(None) => quote!{
                 ::std::convert::From::from(_arg)
@@ -1367,8 +1375,8 @@ impl ParseFn {
             },
             ParseFn::TryFromStr(fun) => quote!{
                 #fun(_arg)
-                    .map_err(|e| ::gumdrop::Error::failed_parse(_opt,
-                        ::std::string::ToString::to_string(&e)))?
+                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                        #name, ::std::string::ToString::to_string(&e)))?
             }
         };
 
@@ -1409,7 +1417,7 @@ impl Default for ParseFn {
 
 impl ParseMethod {
     fn make_action_type(&self) -> TokenStream2 {
-        let parse = self.parse_fn.make_parse_action();
+        let parse = self.parse_fn.make_parse_action(None);
 
         match self.tuple_len {
             None => quote!{ {
@@ -1439,7 +1447,7 @@ impl ParseMethod {
 
     fn make_action_type_arg(&self) -> TokenStream2 {
         match self.tuple_len {
-            None => self.parse_fn.make_parse_action(),
+            None => self.parse_fn.make_parse_action(None),
             Some(_) => unreachable!()
         }
     }

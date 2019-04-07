@@ -1110,3 +1110,29 @@ Optional arguments:
         // Skip leading newline
         [1..]);
 }
+
+#[test]
+fn test_failed_parse_free() {
+    #[derive(Options)]
+    struct Opts {
+        #[options(free)]
+        foo: u32,
+        #[options(free, parse(try_from_str = "parse"))]
+        bar: u32,
+        #[options(free)]
+        baz: Vec<u32>,
+    }
+
+    fn parse(s: &str) -> Result<u32, <u32 as FromStr>::Err> {
+        s.parse()
+    }
+
+    is_err!(Opts::parse_args_default(&["x"]),
+        |e| e.starts_with("invalid argument to option `foo`: "));
+
+    is_err!(Opts::parse_args_default(&["0", "x"]),
+        |e| e.starts_with("invalid argument to option `bar`: "));
+
+    is_err!(Opts::parse_args_default(&["0", "0", "x"]),
+        |e| e.starts_with("invalid argument to option `baz`: "));
+}
