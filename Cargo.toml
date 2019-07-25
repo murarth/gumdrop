@@ -14,6 +14,10 @@ keywords = ["args", "command-line", "flag", "getopts", "option"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
 
+[features]
+default = []
+default_expr = ["gumdrop_derive/default_expr"]
+
 [dependencies]
 gumdrop_derive = { version = "0.6", path = "gumdrop_derive" }
 

@@ -1137,6 +1137,7 @@ fn test_failed_parse_free() {
         |e| e.starts_with("invalid argument to option `baz`: "));
 }
 
+#[cfg(feature = "default_expr")]
 #[test]
 fn test_default_expr() {
     #[derive(Options)]

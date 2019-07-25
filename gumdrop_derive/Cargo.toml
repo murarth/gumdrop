@@ -17,7 +17,11 @@ license = "MIT/Apache-2.0"
 name = "gumdrop_derive"
 proc-macro = true
 
+[features]
+default = []
+default_expr = ["syn/full"]
+
 [dependencies]
 proc-macro2 = "0.4.4"
 quote = "0.6"
-syn = { version = "0.15", features = ["full"] }
+syn = { version = "0.15" }

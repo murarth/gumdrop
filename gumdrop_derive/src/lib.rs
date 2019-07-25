@@ -35,7 +35,8 @@
 //!   The value of this field is parsed in the same way as argument values.
 //! * `default_expr` provides a default value for the option field.
 //!   The value of this field is parsed at compile time as a Rust expression
-//!   and is evaluated before any argument values are processed.
+//!   and is evaluated before any argument values are processed.  
+//!   The `default_expr` feature must be enabled to use this attribute.
 //! * `required` will cause an error if the option is not present,
 //!   unless at least one `help_flag` option is also present.
 //! * `multi = "..."` will allow parsing an option multiple times,
@@ -80,11 +81,14 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 
 use syn::{
-    parse::Error, spanned::Spanned, Expr,
+    parse::Error, spanned::Spanned,
     Attribute, AttrStyle, Data, DataEnum, DataStruct, DeriveInput, Fields,
     GenericArgument, Ident, Lit, Meta, NestedMeta, Path, PathArguments, Type,
     parse_str,
 };
+
+#[cfg(feature = "default_expr")]
+use syn::Expr;
 
 #[proc_macro_derive(Options, attributes(options))]
 pub fn derive_options(input: TokenStream) -> TokenStream {
@@ -275,10 +279,18 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             default.push(opts.parse.as_ref()
                 .unwrap_or(&ParseFn::Default)
                 .make_parse_default_action(ident, &expr));
-        } else if let Some(expr) = &opts.default_expr {
-            default.push(quote!{ #expr });
         } else {
+            #[cfg(not(feature = "default_expr"))]
             default.push(default_expr.clone());
+
+            #[cfg(feature = "default_expr")]
+            {
+                if let Some(expr) = &opts.default_expr {
+                    default.push(quote!{ #expr });
+                } else {
+                    default.push(default_expr.clone());
+                }
+            }
         }
 
         if opts.command {
@@ -675,6 +687,7 @@ struct AttrOpts {
     meta: Option<String>,
     parse: Option<ParseFn>,
     default: Option<String>,
+    #[cfg(feature = "default_expr")]
     default_expr: Option<Expr>,
 
     command: bool,
@@ -885,8 +898,11 @@ impl AttrOpts {
             if self.count { err!("`count` and `parse` are mutually exclusive"); }
         }
 
-        if self.default.is_some() && self.default_expr.is_some() {
-            err!("`default` and `default_expr` are mutually exclusive");
+        #[cfg(feature = "default_expr")]
+        {
+            if self.default.is_some() && self.default_expr.is_some() {
+                err!("`default` and `default_expr` are mutually exclusive");
+            }
         }
 
         Ok(())
@@ -966,9 +982,16 @@ impl AttrOpts {
                     Meta::NameValue(nv) => {
                         match &nv.ident.to_string()[..] {
                             "default" => self.default = Some(lit_str(&nv.lit)?),
+                            #[cfg(feature = "default_expr")]
                             "default_expr" => {
                                 let expr = parse_str(&lit_str(&nv.lit)?)?;
                                 self.default_expr = Some(expr);
+                            }
+                            #[cfg(not(feature = "default_expr"))]
+                            "default_expr" => {
+                                return Err(Error::new(nv.ident.span(),
+                                    "compile gumdrop with the `default_expr` \
+                                    feature to enable this attribute"));
                             }
                             "long" => self.long = Some(lit_str(&nv.lit)?),
                             "short" => self.short = Some(lit_char(&nv.lit)?),
