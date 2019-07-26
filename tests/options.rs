@@ -1,8 +1,6 @@
-#[macro_use] extern crate assert_matches;
-#[allow(unused_imports)]
-#[macro_use] extern crate gumdrop;
-
 use std::str::FromStr;
+
+use assert_matches::assert_matches;
 
 use gumdrop::Options;
 

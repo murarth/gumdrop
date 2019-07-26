@@ -13,12 +13,6 @@ To include `gumdrop` in your project, add the following to your `Cargo.toml`:
 gumdrop = "0.6"
 ```
 
-And the following to your crate root:
-
-```rust
-#[macro_use] extern crate gumdrop;
-```
-
 ## License
 
 `gumdrop` is distributed under the terms of both the MIT license and the

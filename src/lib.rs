@@ -3,8 +3,6 @@
 //! # Examples
 //!
 //! ```
-//! #[macro_use] extern crate gumdrop;
-//!
 //! use gumdrop::Options;
 //!
 //! // Defines options that can be parsed from the command line.
@@ -63,8 +61,6 @@
 //! option parser.
 //!
 //! ```
-//! #[macro_use] extern crate gumdrop;
-//!
 //! use gumdrop::Options;
 //!
 //! // Define options for the program.
@@ -136,8 +132,6 @@
 //! A custom parsing function can be supplied for each option field.
 //!
 //! ```
-//! #[macro_use] extern crate gumdrop;
-//!
 //! use gumdrop::Options;
 //!
 //! #[derive(Debug, Options)]
@@ -167,13 +161,6 @@
 
 #![deny(missing_docs)]
 
-#[cfg(test)] #[macro_use] extern crate assert_matches;
-
-#[macro_use]
-#[allow(unused_imports)]
-extern crate gumdrop_derive;
-
-#[doc(hidden)]
 pub use gumdrop_derive::*;
 
 use std::error::Error as StdError;
@@ -661,6 +648,7 @@ impl Default for ParsingStyle {
 #[cfg(test)]
 mod test {
     use super::{Opt, Parser, ParsingStyle};
+    use assert_matches::assert_matches;
 
     #[test]
     fn test_parser() {

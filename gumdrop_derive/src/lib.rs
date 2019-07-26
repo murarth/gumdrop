@@ -71,11 +71,10 @@
 #![recursion_limit = "1024"]
 
 extern crate proc_macro;
-extern crate proc_macro2;
-#[macro_use] extern crate quote;
-extern crate syn;
 
 use std::iter::repeat;
+
+use quote::quote;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};

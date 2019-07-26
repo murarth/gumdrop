@@ -1,6 +1,3 @@
-#[allow(unused_imports)]
-#[macro_use] extern crate gumdrop;
-
 use gumdrop::Options;
 
 // Define options for the program.
