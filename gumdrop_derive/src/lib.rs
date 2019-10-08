@@ -136,7 +136,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 return Err(Error::new(span,
                     "command variants must be unary tuple variants")),
             Fields::Unnamed(fields) =>
-                &fields.unnamed.first().unwrap().into_value().ty,
+                &fields.unnamed.first().unwrap().ty,
         };
 
         let opts = CmdOpts::parse(&var.attrs)?;
@@ -761,7 +761,7 @@ impl Action {
     fn infer(ty: &Type, opts: &AttrOpts) -> Action {
         match ty {
             Type::Path(path) => {
-                let path = path.path.segments.last().unwrap().into_value();
+                let path = path.path.segments.last().unwrap();
                 let param = first_ty_param(ty);
 
                 match &path.ident.to_string()[..] {
@@ -926,11 +926,11 @@ impl AttrOpts {
                     let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(ident) =>
-                            return Err(Error::new(ident.span(),
+                        Meta::Path(path) =>
+                            return Err(Error::new(path.span(),
                                 "`#[options]` is not a valid attribute")),
                         Meta::NameValue(nv) =>
-                            return Err(Error::new(nv.ident.span(),
+                            return Err(Error::new(nv.path.span(),
                                 "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
@@ -949,58 +949,64 @@ impl AttrOpts {
 
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
-            NestedMeta::Literal(lit) =>
+            NestedMeta::Lit(lit) =>
                 return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
-                    Meta::Word(w) => match &w.to_string()[..] {
-                        "free" => self.free = true,
-                        "command" => self.command = true,
-                        "count" => self.count = true,
-                        "help_flag" => self.help_flag = true,
-                        "no_help_flag" => self.no_help_flag = true,
-                        "no_short" => self.no_short = true,
-                        "no_long" => self.no_long = true,
-                        "no_multi" => self.no_multi = true,
-                        "required" => self.required = true,
-                        "not_required" => self.not_required = true,
-                        _ => return Err(unexpected_meta_item(w.span()))
+                    Meta::Path(path) => match path.get_ident() {
+                        Some(ident) => match ident.to_string().as_str() {
+                            "free" => self.free = true,
+                            "command" => self.command = true,
+                            "count" => self.count = true,
+                            "help_flag" => self.help_flag = true,
+                            "no_help_flag" => self.no_help_flag = true,
+                            "no_short" => self.no_short = true,
+                            "no_long" => self.no_long = true,
+                            "no_multi" => self.no_multi = true,
+                            "required" => self.required = true,
+                            "not_required" => self.not_required = true,
+                            _ => return Err(unexpected_meta_item(path.span()))
+                        }
+                        None => return Err(unexpected_meta_item(path.span()))
                     },
                     Meta::List(list) => {
-                        match &list.ident.to_string()[..] {
-                            "parse" => {
+                        match list.path.get_ident() {
+                            Some(ident) if ident.to_string() == "parse" => {
                                 if list.nested.len() != 1 {
-                                    return Err(unexpected_meta_item(list.ident.span()));
+                                    return Err(unexpected_meta_item(list.path.span()));
                                 }
 
                                 self.parse = Some(ParseFn::parse(&list.nested[0])?);
                             }
-                            _ => return Err(unexpected_meta_item(list.ident.span()))
+                            _ => return Err(unexpected_meta_item(list.path.span()))
                         }
                     }
                     Meta::NameValue(nv) => {
-                        match &nv.ident.to_string()[..] {
-                            "default" => self.default = Some(lit_str(&nv.lit)?),
-                            #[cfg(feature = "default_expr")]
-                            "default_expr" => {
-                                let expr = parse_str(&lit_str(&nv.lit)?)?;
-                                self.default_expr = Some(expr);
-                            }
-                            #[cfg(not(feature = "default_expr"))]
-                            "default_expr" => {
-                                return Err(Error::new(nv.ident.span(),
+                        match nv.path.get_ident() {
+                            Some(ident) => match ident.to_string().as_str() {
+                                "default" => self.default = Some(lit_str(&nv.lit)?),
+                                #[cfg(feature = "default_expr")]
+                                "default_expr" => {
+                                    let expr = parse_str(&lit_str(&nv.lit)?)?;
+                                    self.default_expr = Some(expr);
+                                }
+                                #[cfg(not(feature = "default_expr"))]
+                                "default_expr" => {
+                                    return Err(Error::new(nv.path.span(),
                                     "compile gumdrop with the `default_expr` \
                                     feature to enable this attribute"));
+                                }
+                                "long" => self.long = Some(lit_str(&nv.lit)?),
+                                "short" => self.short = Some(lit_char(&nv.lit)?),
+                                "help" => self.help = Some(lit_str(&nv.lit)?),
+                                "meta" => self.meta = Some(lit_str(&nv.lit)?),
+                                "multi" => {
+                                    let name = parse_str(&lit_str(&nv.lit)?)?;
+                                    self.multi = Some(name);
+                                }
+                                _ => return Err(unexpected_meta_item(nv.path.span()))
                             }
-                            "long" => self.long = Some(lit_str(&nv.lit)?),
-                            "short" => self.short = Some(lit_char(&nv.lit)?),
-                            "help" => self.help = Some(lit_str(&nv.lit)?),
-                            "meta" => self.meta = Some(lit_str(&nv.lit)?),
-                            "multi" => {
-                                let name = parse_str(&lit_str(&nv.lit)?)?;
-                                self.multi = Some(name);
-                            }
-                            _ => return Err(unexpected_meta_item(nv.ident.span()))
+                            None => return Err(unexpected_meta_item(nv.path.span()))
                         }
                     }
                 }
@@ -1052,11 +1058,11 @@ impl CmdOpts {
                     let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(ident) =>
-                            return Err(Error::new(ident.span(),
+                        Meta::Path(path) =>
+                            return Err(Error::new(path.span(),
                                 "`#[options]` is not a valid attribute")),
                         Meta::NameValue(nv) =>
-                            return Err(Error::new(nv.ident.span(),
+                            return Err(Error::new(nv.path.span(),
                                 "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
@@ -1073,19 +1079,22 @@ impl CmdOpts {
 
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
-            NestedMeta::Literal(lit) =>
+            NestedMeta::Lit(lit) =>
                 return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
-                    Meta::Word(ident) =>
-                        return Err(unexpected_meta_item(ident.span())),
+                    Meta::Path(path) =>
+                        return Err(unexpected_meta_item(path.span())),
                     Meta::List(list) =>
-                        return Err(unexpected_meta_item(list.ident.span())),
+                        return Err(unexpected_meta_item(list.path.span())),
                     Meta::NameValue(nv) => {
-                        match &nv.ident.to_string()[..] {
-                            "name" => self.name = Some(lit_str(&nv.lit)?),
-                            "help" => self.help = Some(lit_str(&nv.lit)?),
-                            _ => return Err(unexpected_meta_item(nv.ident.span()))
+                        match nv.path.get_ident() {
+                            Some(ident) => match ident.to_string().as_str() {
+                                "name" => self.name = Some(lit_str(&nv.lit)?),
+                                "help" => self.help = Some(lit_str(&nv.lit)?),
+                                _ => return Err(unexpected_meta_item(nv.path.span()))
+                            }
+                            None => return Err(unexpected_meta_item(nv.path.span()))
                         }
                     }
                 }
@@ -1116,11 +1125,11 @@ impl DefaultOpts {
                     let meta = attr.parse_meta()?;
 
                     match meta {
-                        Meta::Word(ident) =>
-                            return Err(Error::new(ident.span(),
+                        Meta::Path(path) =>
+                            return Err(Error::new(path.span(),
                                 "`#[options]` is not a valid attribute")),
                         Meta::NameValue(nv) =>
-                            return Err(Error::new(nv.ident.span(),
+                            return Err(Error::new(nv.path.span(),
                                 "`#[options = ...]` is not a valid attribute")),
                         Meta::List(items) => {
                             for item in &items.nested {
@@ -1137,26 +1146,29 @@ impl DefaultOpts {
 
     fn parse_item(&mut self, item: &NestedMeta) -> Result<(), Error> {
         match item {
-            NestedMeta::Literal(lit) =>
+            NestedMeta::Lit(lit) =>
                 return Err(unexpected_meta_item(lit.span())),
             NestedMeta::Meta(item) => {
                 match item {
-                    Meta::Word(w) => match &w.to_string()[..] {
-                        "no_help_flag" => self.no_help_flag = true,
-                        "no_short" => self.no_short = true,
-                        "no_long" => self.no_long = true,
-                        "no_multi" => self.no_multi = true,
-                        "required" => self.required = true,
-                        _ => return Err(unexpected_meta_item(w.span()))
+                    Meta::Path(path) => match path.get_ident() {
+                        Some(ident) => match ident.to_string().as_str() {
+                            "no_help_flag" => self.no_help_flag = true,
+                            "no_short" => self.no_short = true,
+                            "no_long" => self.no_long = true,
+                            "no_multi" => self.no_multi = true,
+                            "required" => self.required = true,
+                            _ => return Err(unexpected_meta_item(ident.span()))
+                        }
+                        None => return Err(unexpected_meta_item(path.span()))
                     },
                     Meta::NameValue(nv) => {
-                        match &nv.ident.to_string()[..] {
-                            "help" => self.help = Some(lit_str(&nv.lit)?),
-                            _ => return Err(unexpected_meta_item(nv.ident.span()))
+                        match nv.path.get_ident() {
+                           Some(ident) if ident.to_string() == "help" => self.help = Some(lit_str(&nv.lit)?),
+                            _ => return Err(unexpected_meta_item(nv.path.span()))
                         }
                     }
                     Meta::List(list) =>
-                        return Err(unexpected_meta_item(list.ident.span()))
+                        return Err(unexpected_meta_item(list.path.span()))
                 }
             }
         }
@@ -1169,7 +1181,7 @@ impl FreeAction {
     fn infer(ty: &Type, opts: &AttrOpts) -> FreeAction {
         match ty {
             Type::Path(path) => {
-                let path = path.path.segments.last().unwrap().into_value();
+                let path = path.path.segments.last().unwrap();
 
                 match &path.ident.to_string()[..] {
                     "Option" => FreeAction::SetOption,
@@ -1366,27 +1378,33 @@ impl<'a> Opt<'a> {
 impl ParseFn {
     fn parse(item: &NestedMeta) -> Result<ParseFn, Error> {
         let result = match item {
-            NestedMeta::Meta(Meta::Word(ident)) => {
-                match &ident.to_string()[..] {
-                    "from_str" => ParseFn::FromStr(None),
-                    "try_from_str" => ParseFn::Default,
-                    _ => return Err(unexpected_meta_item(ident.span()))
+            NestedMeta::Meta(Meta::Path(path)) => {
+                match path.get_ident() {
+                    Some(ident) => match ident.to_string().as_str() {
+                        "from_str" => ParseFn::FromStr(None),
+                        "try_from_str" => ParseFn::Default,
+                        _ => return Err(unexpected_meta_item(ident.span()))
+                    }
+                    None => return Err(unexpected_meta_item(path.span()))
                 }
             }
             NestedMeta::Meta(Meta::NameValue(nv)) => {
-                match &nv.ident.to_string()[..] {
-                    "from_str" => {
-                        let path = parse_str(&lit_str(&nv.lit)?)?;
-                        ParseFn::FromStr(Some(path))
+                match nv.path.get_ident() {
+                    Some(ident) => match ident.to_string().as_str() {
+                        "from_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::FromStr(Some(path))
+                        }
+                        "try_from_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::TryFromStr(path)
+                        }
+                        _ => return Err(unexpected_meta_item(nv.path.span()))
                     }
-                    "try_from_str" => {
-                        let path = parse_str(&lit_str(&nv.lit)?)?;
-                        ParseFn::TryFromStr(path)
-                    }
-                    _ => return Err(unexpected_meta_item(nv.ident.span()))
+                    None => return Err(unexpected_meta_item(nv.path.span()))
                 }
             }
-            NestedMeta::Literal(_) |
+            NestedMeta::Lit(_) |
             NestedMeta::Meta(Meta::List(_)) =>
                 return Err(unexpected_meta_item(item.span())),
         };
@@ -1502,7 +1520,7 @@ impl ParseMethod {
 fn first_ty_param(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Path(path) => {
-            let path = path.path.segments.last().unwrap().into_value();
+            let path = path.path.segments.last().unwrap();
 
             match &path.arguments {
                 PathArguments::AngleBracketed(data) =>
@@ -1554,7 +1572,7 @@ fn lit_char(lit: &Lit) -> Result<char, Error> {
 
 fn path_eq(path: &Path, s: &str) -> bool {
     path.segments.len() == 1 && {
-        let seg = path.segments.first().unwrap().into_value();
+        let seg = path.segments.first().unwrap();
 
         match seg.arguments {
             PathArguments::None => seg.ident == s,
