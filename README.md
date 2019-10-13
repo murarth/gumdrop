@@ -10,7 +10,7 @@ To include `gumdrop` in your project, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gumdrop = "0.6"
+gumdrop = "0.7"
 ```
 
 ## License
