@@ -7,13 +7,17 @@ use gumdrop::Options;
 const EMPTY: &'static [&'static str] = &[];
 
 #[derive(Debug, Options)]
-struct NoOpts { }
+struct NoOpts {}
 
 macro_rules! is_err {
     ( $e:expr , |$ident:ident| $expr:expr ) => {
         let $ident = $e.map(|_| ()).unwrap_err().to_string();
-        assert!($expr,
-            "error {:?} does not match `{}`", $ident, stringify!($expr));
+        assert!(
+            $expr,
+            "error {:?} does not match `{}`",
+            $ident,
+            stringify!($expr)
+        );
     };
     ( $e:expr , $str:expr ) => {
         assert_eq!($e.map(|_| ()).unwrap_err().to_string(), $str)
@@ -24,19 +28,32 @@ macro_rules! is_err {
 fn test_hygiene() {
     // Define these aliases in local scope to ensure that generated code
     // is using absolute paths, i.e. `::std::result::Result`
-    #[allow(dead_code)] struct AsRef;
-    #[allow(dead_code)] struct Default;
-    #[allow(dead_code)] struct FromStr;
-    #[allow(dead_code)] struct Option;
-    #[allow(dead_code)] struct Some;
-    #[allow(dead_code)] struct None;
-    #[allow(dead_code)] struct Options;
-    #[allow(dead_code)] struct Result;
-    #[allow(dead_code)] struct Ok;
-    #[allow(dead_code)] struct Err;
-    #[allow(dead_code)] struct String;
-    #[allow(dead_code)] struct ToString;
-    #[allow(dead_code)] struct Vec;
+    #[allow(dead_code)]
+    struct AsRef;
+    #[allow(dead_code)]
+    struct Default;
+    #[allow(dead_code)]
+    struct FromStr;
+    #[allow(dead_code)]
+    struct Option;
+    #[allow(dead_code)]
+    struct Some;
+    #[allow(dead_code)]
+    struct None;
+    #[allow(dead_code)]
+    struct Options;
+    #[allow(dead_code)]
+    struct Result;
+    #[allow(dead_code)]
+    struct Ok;
+    #[allow(dead_code)]
+    struct Err;
+    #[allow(dead_code)]
+    struct String;
+    #[allow(dead_code)]
+    struct ToString;
+    #[allow(dead_code)]
+    struct Vec;
 
     #[derive(Options)]
     struct Opts {
@@ -141,10 +158,14 @@ fn test_command() {
     let cmd = opts.command.unwrap();
     assert_matches!(cmd, Command::FooXYZ(_));
 
-    is_err!(Opts::parse_args_default(&["foo", "-h"]),
-        "unrecognized option `-h`");
-    is_err!(Opts::parse_args_default(&["baz"]),
-        "unrecognized command `baz`");
+    is_err!(
+        Opts::parse_args_default(&["foo", "-h"]),
+        "unrecognized option `-h`"
+    );
+    is_err!(
+        Opts::parse_args_default(&["baz"]),
+        "unrecognized command `baz`"
+    );
 }
 
 #[test]
@@ -165,7 +186,6 @@ fn test_command_name() {
         Baz(NoOpts),
         BoopyDoop(NoOpts),
     }
-
 
     let opts = Opts::parse_args_default(&["foo"]).unwrap();
     assert_matches!(opts.command_name(), Some("foo"));
@@ -202,12 +222,15 @@ fn test_command_usage() {
         Baz(NoOpts),
     }
 
-    assert_eq!(Command::usage(), &"
+    assert_eq!(
+        Command::usage(),
+        &"
   foo   foo help
   bar   bar help
   bzzz  baz help"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 
     assert_eq!(Command::command_list(), Some(Command::usage()));
     assert_eq!(Opts::command_list(), Some(Command::usage()));
@@ -226,8 +249,10 @@ fn test_opt_bool() {
     let opts = Opts::parse_args_default(&["-s"]).unwrap();
     assert_eq!(opts.switch, true);
 
-    is_err!(Opts::parse_args_default(&["--switch=x"]),
-        "option `--switch` does not accept an argument");
+    is_err!(
+        Opts::parse_args_default(&["--switch=x"]),
+        "option `--switch` does not accept an argument"
+    );
 }
 
 #[test]
@@ -263,12 +288,12 @@ fn test_opt_int() {
     let opts = Opts::parse_args_default(&["-n123"]).unwrap();
     assert_eq!(opts.number, 123);
 
-    is_err!(Opts::parse_args_default(&["-nfail"]),
-        |e| e.starts_with("invalid argument to option `-n`: "));
-    is_err!(Opts::parse_args_default(&["--number", "fail"]),
-        |e| e.starts_with("invalid argument to option `--number`: "));
-    is_err!(Opts::parse_args_default(&["--number=fail"]),
-        |e| e.starts_with("invalid argument to option `--number`: "));
+    is_err!(Opts::parse_args_default(&["-nfail"]), |e| e
+        .starts_with("invalid argument to option `-n`: "));
+    is_err!(Opts::parse_args_default(&["--number", "fail"]), |e| e
+        .starts_with("invalid argument to option `--number`: "));
+    is_err!(Opts::parse_args_default(&["--number=fail"]), |e| e
+        .starts_with("invalid argument to option `--number`: "));
 }
 
 #[test]
@@ -283,19 +308,30 @@ fn test_opt_tuple() {
     }
 
     let opts = Opts::parse_args_default(&[
-        "--alpha", "1", "2",
-        "--bravo", "11", "12", "13",
-        "--charlie", "21", "22", "23", "24",
-        "--charlie", "31", "32", "33", "34",
+        "--alpha",
+        "1",
+        "2",
+        "--bravo",
+        "11",
+        "12",
+        "13",
+        "--charlie",
+        "21",
+        "22",
+        "23",
+        "24",
+        "--charlie",
+        "31",
+        "32",
+        "33",
+        "34",
         "free",
-    ]).unwrap();
+    ])
+    .unwrap();
 
     assert_eq!(opts.alpha, (1, 2));
     assert_eq!(opts.bravo, Some((11, 12, 13)));
-    assert_eq!(opts.charlie, vec![
-        (21, 22, 23, 24),
-        (31, 32, 33, 34),
-    ]);
+    assert_eq!(opts.charlie, vec![(21, 22, 23, 24), (31, 32, 33, 34),]);
     assert_eq!(opts.free, vec!["free".to_owned()]);
 }
 
@@ -306,12 +342,18 @@ fn test_opt_tuple_error() {
         foo: Option<(i32, i32)>,
     }
 
-    is_err!(Opts::parse_args_default(&["--foo"]),
-        "insufficient arguments to option `--foo`: expected 2; found 0");
-    is_err!(Opts::parse_args_default(&["--foo=0", "1"]),
-        "option `--foo` expects 2 arguments; found 1");
-    is_err!(Opts::parse_args_default(&["--foo", "0"]),
-        "insufficient arguments to option `--foo`: expected 2; found 1");
+    is_err!(
+        Opts::parse_args_default(&["--foo"]),
+        "insufficient arguments to option `--foo`: expected 2; found 0"
+    );
+    is_err!(
+        Opts::parse_args_default(&["--foo=0", "1"]),
+        "option `--foo` expects 2 arguments; found 1"
+    );
+    is_err!(
+        Opts::parse_args_default(&["--foo", "0"]),
+        "insufficient arguments to option `--foo`: expected 2; found 1"
+    );
 }
 
 #[test]
@@ -324,8 +366,7 @@ fn test_opt_push() {
     let opts = Opts::parse_args_default(EMPTY).unwrap();
     assert!(opts.thing.is_empty());
 
-    let opts = Opts::parse_args_default(
-        &["-t", "a", "-tb", "--thing=c", "--thing", "d"]).unwrap();
+    let opts = Opts::parse_args_default(&["-t", "a", "-tb", "--thing=c", "--thing", "d"]).unwrap();
     assert_eq!(opts.thing, ["a", "b", "c", "d"]);
 }
 
@@ -358,10 +399,14 @@ fn test_opt_long() {
     let opts = Opts::parse_args_default(&["--thing"]).unwrap();
     assert_eq!(opts.foo, true);
 
-    is_err!(Opts::parse_args_default(&["-f"]),
-        "unrecognized option `-f`");
-    is_err!(Opts::parse_args_default(&["--foo"]),
-        "unrecognized option `--foo`");
+    is_err!(
+        Opts::parse_args_default(&["-f"]),
+        "unrecognized option `-f`"
+    );
+    is_err!(
+        Opts::parse_args_default(&["--foo"]),
+        "unrecognized option `--foo`"
+    );
 }
 
 #[test]
@@ -375,10 +420,14 @@ fn test_opt_short() {
     let opts = Opts::parse_args_default(&["-x"]).unwrap();
     assert_eq!(opts.foo, true);
 
-    is_err!(Opts::parse_args_default(&["-f"]),
-        "unrecognized option `-f`");
-    is_err!(Opts::parse_args_default(&["--foo"]),
-        "unrecognized option `--foo`");
+    is_err!(
+        Opts::parse_args_default(&["-f"]),
+        "unrecognized option `-f`"
+    );
+    is_err!(
+        Opts::parse_args_default(&["--foo"]),
+        "unrecognized option `--foo`"
+    );
 }
 
 #[test]
@@ -419,12 +468,13 @@ fn test_opt_free() {
 #[test]
 fn test_opt_no_free() {
     #[derive(Options)]
-    struct Opts {
-    }
+    struct Opts {}
 
     assert!(Opts::parse_args_default(EMPTY).is_ok());
-    is_err!(Opts::parse_args_default(&["a"]),
-        "unexpected free argument `a`");
+    is_err!(
+        Opts::parse_args_default(&["a"]),
+        "unexpected free argument `a`"
+    );
 }
 
 #[test]
@@ -469,16 +519,21 @@ fn test_multi_free() {
     assert_eq!(opts.bravo, Some("two".to_owned()));
     assert_eq!(opts.charlie, Some(3));
 
-    is_err!(Opts::parse_args_default(&["1", "two", "3", "4"]),
-        "unexpected free argument `4`");
+    is_err!(
+        Opts::parse_args_default(&["1", "two", "3", "4"]),
+        "unexpected free argument `4`"
+    );
 
-    assert_eq!(Opts::usage(), &"
+    assert_eq!(
+        Opts::usage(),
+        &"
 Positional arguments:
   alpha    alpha help
   bravo    bravo help
   charlie  charlie help"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 
     #[derive(Options)]
     struct ManyOpts {
@@ -504,7 +559,10 @@ Positional arguments:
     assert_eq!(opts.alpha, 1);
     assert_eq!(opts.bravo, Some("two".to_owned()));
     assert_eq!(opts.charlie, Some(3));
-    assert_eq!(opts.rest, vec!["4".to_owned(), "five".to_owned(), "VI".to_owned()]);
+    assert_eq!(
+        opts.rest,
+        vec!["4".to_owned(), "five".to_owned(), "VI".to_owned()]
+    );
 }
 
 #[test]
@@ -527,7 +585,9 @@ fn test_usage() {
         very_very_long_option_with_very_very_long_name: bool,
     }
 
-    assert_eq!(Opts::usage(), &"
+    assert_eq!(
+        Opts::usage(),
+        &"
 Optional arguments:
   -a, --alpha      alpha help
   --bravo BRAVO    bravo help
@@ -538,7 +598,8 @@ Optional arguments:
   --very-very-long-option-with-very-very-long-name
                    long option help"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 
     #[derive(Options)]
     struct TupleOpts {
@@ -554,7 +615,9 @@ Optional arguments:
         echo: (i32, i32, i32, i32),
     }
 
-    assert_eq!(TupleOpts::usage(), &"
+    assert_eq!(
+        TupleOpts::usage(),
+        &"
 Optional arguments:
   -a, --alpha        alpha help
   -b, --bravo BRAVO  bravo help
@@ -565,7 +628,8 @@ Optional arguments:
   -e, --echo ECHO VALUE0 VALUE1 VALUE2
                      echo help"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 
     #[derive(Options)]
     struct FreeOpts {
@@ -580,7 +644,9 @@ Optional arguments:
         option: bool,
     }
 
-    assert_eq!(FreeOpts::usage(), &"
+    assert_eq!(
+        FreeOpts::usage(),
+        &"
 Positional arguments:
   a             a help
   b             b help
@@ -589,7 +655,8 @@ Positional arguments:
 Optional arguments:
   -o, --option  option help"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 }
 
 #[test]
@@ -716,12 +783,18 @@ fn test_type_attrs() {
         bar: bool,
     }
 
-    is_err!(Opts::parse_args_default(&["-f"]),
-        "unrecognized option `-f`");
-    is_err!(Opts::parse_args_default(&["--bar"]),
-        "unrecognized option `--bar`");
-    is_err!(Opts::parse_args_default(&["-h"]),
-        "unrecognized option `-h`");
+    is_err!(
+        Opts::parse_args_default(&["-f"]),
+        "unrecognized option `-f`"
+    );
+    is_err!(
+        Opts::parse_args_default(&["--bar"]),
+        "unrecognized option `--bar`"
+    );
+    is_err!(
+        Opts::parse_args_default(&["-h"]),
+        "unrecognized option `-h`"
+    );
 
     let opts = Opts::parse_args_default(&["--help"]).unwrap();
     assert_eq!(opts.help, true);
@@ -741,8 +814,10 @@ fn test_type_attrs() {
         bar: bool,
     }
 
-    is_err!(Opts2::parse_args_default(&["-f"]),
-        "unrecognized option `-f`");
+    is_err!(
+        Opts2::parse_args_default(&["-f"]),
+        "unrecognized option `-f`"
+    );
 
     let opts = Opts2::parse_args_default(&["--foo", "-b"]).unwrap();
     assert_eq!(opts.foo, true);
@@ -759,8 +834,10 @@ fn test_type_attrs() {
         bar: bool,
     }
 
-    is_err!(Opts3::parse_args_default(&["--foo"]),
-        "unrecognized option `--foo`");
+    is_err!(
+        Opts3::parse_args_default(&["--foo"]),
+        "unrecognized option `--foo`"
+    );
 
     let opts = Opts3::parse_args_default(&["--bar"]).unwrap();
     assert_eq!(opts.bar, true);
@@ -789,8 +866,10 @@ fn test_type_attrs() {
         bar: i32,
     }
 
-    is_err!(Opts5::parse_args_default(EMPTY),
-        "missing required option `-f`");
+    is_err!(
+        Opts5::parse_args_default(EMPTY),
+        "missing required option `-f`"
+    );
 
     let opts = Opts5::parse_args_default(&["-f", "1"]).unwrap();
     assert_eq!(opts.foo, 1);
@@ -829,12 +908,15 @@ fn test_required() {
         optional: i32,
     }
 
-    is_err!(Opts::parse_args_default(EMPTY),
-        "missing required option `--foo`");
-    is_err!(Opts2::parse_args_default(EMPTY),
-        "missing required command");
-    is_err!(Opts3::parse_args_default(EMPTY),
-        "missing required free argument");
+    is_err!(
+        Opts::parse_args_default(EMPTY),
+        "missing required option `--foo`"
+    );
+    is_err!(Opts2::parse_args_default(EMPTY), "missing required command");
+    is_err!(
+        Opts3::parse_args_default(EMPTY),
+        "missing required free argument"
+    );
 
     let opts = Opts::parse_args_default(&["-f", "1"]).unwrap();
     assert_eq!(opts.foo, 1);
@@ -900,8 +982,12 @@ fn test_parse() {
     #[derive(Debug)]
     struct Quux(u32);
 
-    fn parse_foo(s: &str) -> Foo { Foo(s.to_owned()) }
-    fn parse_bar(s: &str) -> Result<Bar, <u32 as FromStr>::Err> { s.parse().map(Bar) }
+    fn parse_foo(s: &str) -> Foo {
+        Foo(s.to_owned())
+    }
+    fn parse_bar(s: &str) -> Result<Bar, <u32 as FromStr>::Err> {
+        s.parse().map(Bar)
+    }
 
     impl<'a> From<&'a str> for Baz {
         fn from(s: &str) -> Baz {
@@ -917,17 +1003,17 @@ fn test_parse() {
         }
     }
 
-    let opts = Opts::parse_args_default(&[
-        "-ffoo", "--bar=123", "--baz", "sup", "-q", "456"]).unwrap();
+    let opts =
+        Opts::parse_args_default(&["-ffoo", "--bar=123", "--baz", "sup", "-q", "456"]).unwrap();
     assert_matches!(opts.foo, Some(Foo(ref s)) if s == "foo");
     assert_matches!(opts.bar, Some(Bar(123)));
     assert_matches!(opts.baz, Some(Baz(ref s)) if s == "sup");
     assert_matches!(opts.quux, Some(Quux(456)));
 
-    is_err!(Opts::parse_args_default(&["--bar", "xyz"]),
-        |e| e.starts_with("invalid argument to option `--bar`: "));
-    is_err!(Opts::parse_args_default(&["--quux", "xyz"]),
-        |e| e.starts_with("invalid argument to option `--quux`: "));
+    is_err!(Opts::parse_args_default(&["--bar", "xyz"]), |e| e
+        .starts_with("invalid argument to option `--bar`: "));
+    is_err!(Opts::parse_args_default(&["--quux", "xyz"]), |e| e
+        .starts_with("invalid argument to option `--quux`: "));
 }
 
 #[test]
@@ -975,8 +1061,8 @@ fn test_failed_default() {
         foo: u32,
     }
 
-    is_err!(Opts::parse_args_default(EMPTY),
-        |e| e.starts_with(r#"invalid default value for `foo` ("lolwut"): "#));
+    is_err!(Opts::parse_args_default(EMPTY), |e| e
+        .starts_with(r#"invalid default value for `foo` ("lolwut"): "#));
 }
 
 #[test]
@@ -990,7 +1076,9 @@ fn test_default_parse() {
     #[derive(Debug, Eq, PartialEq)]
     struct Foo(u32);
 
-    fn parse_foo(s: &str) -> Result<Foo, <u32 as FromStr>::Err> { s.parse().map(Foo) }
+    fn parse_foo(s: &str) -> Result<Foo, <u32 as FromStr>::Err> {
+        s.parse().map(Foo)
+    }
 
     let opts = Opts::parse_args_default(EMPTY).unwrap();
     assert_eq!(opts.foo, Foo(1));
@@ -1062,8 +1150,10 @@ fn test_no_multi() {
     let opts = Opts3::parse_args_default(&["foo,bar,baz"]).unwrap();
     assert_eq!(opts.list_things, ["foo", "bar", "baz"]);
 
-    is_err!(Opts3::parse_args_default(&["foo,bar,baz", "error"]),
-        "unexpected free argument `error`");
+    is_err!(
+        Opts3::parse_args_default(&["foo,bar,baz", "error"]),
+        "unexpected free argument `error`"
+    );
 }
 
 #[test]
@@ -1090,7 +1180,9 @@ fn test_doc_help() {
         Bravo(NoOpts),
     }
 
-    assert_eq!(Opts::usage(), &"
+    assert_eq!(
+        Opts::usage(),
+        &"
 type-level help comment
 
 Positional arguments:
@@ -1100,13 +1192,17 @@ Optional arguments:
   -f, --foo FOO  help comment
   -b, --bar BAR  help attribute"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 
-    assert_eq!(Cmd::usage(), &"
+    assert_eq!(
+        Cmd::usage(),
+        &"
   alpha  help comment
   bravo  help attribute"
         // Skip leading newline
-        [1..]);
+        [1..]
+    );
 }
 
 #[test]
@@ -1125,14 +1221,14 @@ fn test_failed_parse_free() {
         s.parse()
     }
 
-    is_err!(Opts::parse_args_default(&["x"]),
-        |e| e.starts_with("invalid argument to option `foo`: "));
+    is_err!(Opts::parse_args_default(&["x"]), |e| e
+        .starts_with("invalid argument to option `foo`: "));
 
-    is_err!(Opts::parse_args_default(&["0", "x"]),
-        |e| e.starts_with("invalid argument to option `bar`: "));
+    is_err!(Opts::parse_args_default(&["0", "x"]), |e| e
+        .starts_with("invalid argument to option `bar`: "));
 
-    is_err!(Opts::parse_args_default(&["0", "0", "x"]),
-        |e| e.starts_with("invalid argument to option `baz`: "));
+    is_err!(Opts::parse_args_default(&["0", "0", "x"]), |e| e
+        .starts_with("invalid argument to option `baz`: "));
 }
 
 #[cfg(feature = "default_expr")]
@@ -1144,7 +1240,9 @@ fn test_default_expr() {
         foo: u32,
     }
 
-    fn foo() -> u32 { 123 }
+    fn foo() -> u32 {
+        123
+    }
 
     let opts = Opts::parse_args_default(EMPTY).unwrap();
     assert_eq!(opts.foo, foo());
