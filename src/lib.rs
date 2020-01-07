@@ -163,6 +163,7 @@
 
 pub use gumdrop_derive::*;
 
+use std::env::args;
 use std::error::Error as StdError;
 use std::fmt;
 use std::slice::Iter;
@@ -530,6 +531,36 @@ pub trait Options: Sized {
         Self::parse(&mut Parser::new(args, style))
     }
 
+    /// Just print the usage to stdout based on parsed Options.
+    ///
+    /// Useful for printing the same --help or default no-args output
+    /// for multiple cases.
+    fn print_usage(opts: Self) {
+        let args = args().collect::<Vec<_>>();
+
+        match opts.command_name() {
+            None => {
+                println!("Usage: {} [OPTIONS]", args[0]);
+                println!();
+                println!("{}", Self::usage());
+
+                if let Some(cmds) = Self::command_list() {
+                    println!();
+                    println!("Available commands:");
+                    println!();
+                    println!("{}", cmds);
+                }
+            }
+            Some(cmd) => {
+                let help = Self::command_usage(cmd).unwrap_or_default();
+
+                println!("Usage: {} {} [OPTIONS]", args[0], cmd);
+                println!();
+                println!("{}", help);
+            }
+        }
+    }
+
     /// Parses arguments from the environment.
     ///
     /// If an error is encountered, the error is printed to `stderr` and the
@@ -540,7 +571,6 @@ pub trait Options: Sized {
     ///
     /// Otherwise, the parsed options are returned.
     fn parse_args_or_exit(style: ParsingStyle) -> Self {
-        use std::env::args;
         use std::process::exit;
 
         let args = args().collect::<Vec<_>>();
@@ -551,27 +581,7 @@ pub trait Options: Sized {
         });
 
         if opts.help_requested() {
-            match opts.command_name() {
-                None => {
-                    println!("Usage: {} [OPTIONS]", args[0]);
-                    println!();
-                    println!("{}", Self::usage());
-
-                    if let Some(cmds) = Self::command_list() {
-                        println!();
-                        println!("Available commands:");
-                        println!();
-                        println!("{}", cmds);
-                    }
-                }
-                Some(cmd) => {
-                    let help = Self::command_usage(cmd).unwrap_or_default();
-
-                    println!("Usage: {} {} [OPTIONS]", args[0], cmd);
-                    println!();
-                    println!("{}", help);
-                }
-            }
+            Self::print_usage(opts);
             exit(0);
         }
 
