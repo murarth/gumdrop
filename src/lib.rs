@@ -1,5 +1,8 @@
 //! Option parser with custom derive support
 //!
+//! For full documentation on customization of `derive(Options)`, please see the crate
+//! documentation for [`gumdrop_derive`](https://docs.rs/crate/gumdrop_derive/).
+//!
 //! # Examples
 //!
 //! ```
