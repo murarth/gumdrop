@@ -148,6 +148,85 @@ fn test_command() {
 }
 
 #[test]
+fn test_nested_command() {
+    #[derive(Debug, Options)]
+    struct Main {
+        #[options(help = "main help")]
+        help: bool,
+
+        #[options(command)]
+        command: Option<Command>,
+    }
+
+    #[derive(Debug, Options)]
+    enum Command {
+        #[options(help = "alpha help")]
+        Alpha(Alpha),
+        #[options(help = "bravo help")]
+        Bravo(Bravo),
+    }
+
+    #[derive(Debug, Options)]
+    struct Alpha {
+        #[options(help = "alpha command help")]
+        help: bool,
+
+        #[options(command)]
+        command: Option<AlphaCommand>,
+    }
+
+    #[derive(Debug, Options)]
+    struct Bravo {
+        #[options(help = "bravo command help")]
+        help: bool,
+
+        #[options(help = "bravo option help")]
+        option: u32,
+    }
+
+    #[derive(Debug, Options)]
+    enum AlphaCommand {
+        #[options(help = "alpha foo help")]
+        Foo(Foo),
+        #[options(help = "alpha bar help")]
+        Bar(Bar),
+    }
+
+    #[derive(Debug, Options)]
+    struct Foo {
+        #[options(help = "alpha foo command help")]
+        help: bool,
+
+        #[options(help = "alpha foo beep help")]
+        beep: u32,
+    }
+
+    #[derive(Debug, Options)]
+    struct Bar {
+        #[options(help = "alpha bar command help")]
+        help: bool,
+
+        #[options(help = "alpha bar boop help")]
+        boop: u32,
+    }
+
+    let opts = Main::parse_args_default(&["-h"]).unwrap();
+    assert_eq!(opts.self_usage(), Main::usage());
+
+    let opts = Main::parse_args_default(&["-h", "alpha"]).unwrap();
+    assert_eq!(opts.self_usage(), Alpha::usage());
+
+    let opts = Main::parse_args_default(&["-h", "bravo"]).unwrap();
+    assert_eq!(opts.self_usage(), Bravo::usage());
+
+    let opts = Main::parse_args_default(&["-h", "alpha", "foo"]).unwrap();
+    assert_eq!(opts.self_usage(), Foo::usage());
+
+    let opts = Main::parse_args_default(&["-h", "alpha", "bar"]).unwrap();
+    assert_eq!(opts.self_usage(), Bar::usage());
+}
+
+#[test]
 fn test_command_name() {
     #[derive(Options)]
     struct Opts {

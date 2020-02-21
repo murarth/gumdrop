@@ -224,10 +224,17 @@ pub enum Opt<'a> {
 /// Implements a set of options parsed from command line arguments.
 ///
 /// An implementation of this trait can be generated with `#[derive(Options)]`.
-pub trait Options: Sized {
+pub trait Options {
     /// Parses arguments until the given parser is exhausted or until
     /// an error is encountered.
-    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error>;
+    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+
+    /// Returns the subcommand instance, if present.
+    ///
+    /// This method **must never** return `self` or otherwise return a `&dyn Options` instance
+    /// which would create a cycle. Doing so may cause other methods or `gumdrop` functions
+    /// to loop infinitely or overflow the runtime stack.
+    fn command(&self) -> Option<&dyn Options>;
 
     /// Returns the name of a parsed command, if present.
     ///
@@ -248,7 +255,8 @@ pub trait Options: Sized {
     /// Parses arguments received from the command line.
     ///
     /// The first argument (the program name) should be omitted.
-    fn parse_args<S: AsRef<str>>(args: &[S], style: ParsingStyle) -> Result<Self, Error> {
+    fn parse_args<S: AsRef<str>>(args: &[S], style: ParsingStyle) -> Result<Self, Error>
+            where Self: Sized {
         Self::parse(&mut Parser::new(args, style))
     }
 
@@ -261,7 +269,7 @@ pub trait Options: Sized {
     /// `stdout` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
-    fn parse_args_or_exit(style: ParsingStyle) -> Self {
+    fn parse_args_or_exit(style: ParsingStyle) -> Self where Self: Sized {
         use std::env::args;
         use std::process::exit;
 
@@ -273,27 +281,32 @@ pub trait Options: Sized {
         });
 
         if opts.help_requested() {
-            match opts.command_name() {
-                None => {
-                    println!("Usage: {} [OPTIONS]", args[0]);
-                    println!();
-                    println!("{}", Self::usage());
+            let mut command = &opts as &dyn Options;
+            let mut command_str = String::new();
 
-                    if let Some(cmds) = Self::command_list() {
-                        println!();
-                        println!("Available commands:");
-                        println!();
-                        println!("{}", cmds);
+            loop {
+                if let Some(new_command) = command.command() {
+                    command = new_command;
+
+                    if let Some(name) = new_command.command_name() {
+                        command_str.push(' ');
+                        command_str.push_str(name);
                     }
-                }
-                Some(cmd) => {
-                    let help = Self::command_usage(cmd).unwrap_or_default();
-
-                    println!("Usage: {} {} [OPTIONS]", args[0], cmd);
-                    println!();
-                    println!("{}", help);
+                } else {
+                    break;
                 }
             }
+
+            println!("Usage: {}{} [OPTIONS]", args[0], command_str);
+            println!();
+            println!("{}", command.self_usage());
+
+            if let Some(cmds) = command.self_command_list() {
+                println!();
+                println!("Available commands:");
+                println!("{}", cmds);
+            }
+
             exit(0);
         }
 
@@ -309,7 +322,7 @@ pub trait Options: Sized {
     /// `stdout` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
-    fn parse_args_default_or_exit() -> Self {
+    fn parse_args_default_or_exit() -> Self where Self: Sized {
         Self::parse_args_or_exit(ParsingStyle::default())
     }
 
@@ -317,18 +330,27 @@ pub trait Options: Sized {
     /// using the default parsing style.
     ///
     /// The first argument (the program name) should be omitted.
-    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> {
+    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
         Self::parse(&mut Parser::new(args, ParsingStyle::default()))
     }
 
     /// Parses options for the named command.
-    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error>;
+    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
 
     /// Returns a string showing usage and help for each supported option.
     ///
     /// Option descriptions are separated by newlines. The returned string
     /// should **not** end with a newline.
-    fn usage() -> &'static str;
+    fn usage() -> &'static str where Self: Sized;
+
+    /// Returns a string showing usage and help for this options instance.
+    ///
+    /// In contrast to `usage`, this method will return usage for a subcommand,
+    /// if one is selected.
+    ///
+    /// Option descriptions are separated by newlines. The returned string
+    /// should **not** end with a newline.
+    fn self_usage(&self) -> &'static str;
 
     /// Returns a usage string for the named command.
     ///
@@ -336,7 +358,7 @@ pub trait Options: Sized {
     ///
     /// Command descriptions are separated by newlines. The returned string
     /// should **not** end with a newline.
-    fn command_usage(command: &str) -> Option<&'static str>;
+    fn command_usage(command: &str) -> Option<&'static str> where Self: Sized;
 
     /// Returns a string listing available commands and help text.
     ///
@@ -347,7 +369,16 @@ pub trait Options: Sized {
     ///
     /// For `struct` types containing a field marked `#[options(command)]`,
     /// `usage` is called on the command type.
-    fn command_list() -> Option<&'static str>;
+    fn command_list() -> Option<&'static str> where Self: Sized;
+
+    /// Returns a listing of available commands and help text.
+    ///
+    /// In contrast to `usage`, this method will return command list for a subcommand,
+    /// if one is selected.
+    ///
+    /// Commands are separated by newlines. The string should **not** end with
+    /// a newline.
+    fn self_command_list(&self) -> Option<&'static str>;
 }
 
 /// Controls behavior of free arguments in `Parser`

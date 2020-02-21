@@ -182,12 +182,42 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
 
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
+    let command_impl = {
+        let name = repeat(name);
+
+        quote!{
+            match self {
+                #( #name::#variant(cmd) => ::gumdrop::Options::command(cmd), )*
+            }
+        }
+    };
+
     let command_name_impl = {
         let name = repeat(name);
 
         quote!{
             match self {
                 #( #name::#variant(_) => ::std::option::Option::Some(#command), )*
+            }
+        }
+    };
+
+    let self_usage_impl = {
+        let name = repeat(name);
+
+        quote!{
+            match self {
+                #( #name::#variant(sub) => ::gumdrop::Options::self_usage(sub), )*
+            }
+        }
+    };
+
+    let self_command_list_impl = {
+        let name = repeat(name);
+
+        quote!{
+            match self {
+                #( #name::#variant(sub) => ::gumdrop::Options::self_command_list(sub), )*
             }
         }
     };
@@ -201,6 +231,10 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                     .ok_or_else(::gumdrop::Error::missing_command)?;
 
                 Self::parse_command(_arg, _parser)
+            }
+
+            fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
+                #command_impl
             }
 
             fn command_name(&self) -> ::std::option::Option<&'static str> {
@@ -229,8 +263,16 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 #usage
             }
 
+            fn self_usage(&self) -> &'static str {
+                #self_usage_impl
+            }
+
             fn command_list() -> ::std::option::Option<&'static str> {
                 ::std::option::Option::Some(<Self as ::gumdrop::Options>::usage())
+            }
+
+            fn self_command_list(&self) -> ::std::option::Option<&'static str> {
+                #self_command_list_impl
             }
 
             fn command_usage(name: &str) -> ::std::option::Option<&'static str> {
@@ -540,6 +582,15 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         }
     };
 
+    let command_impl = match &command {
+        None => quote!{ ::std::option::Option::None },
+        Some(field) => quote!{
+            ::std::option::Option::map(
+                ::std::option::Option::as_ref(&self.#field),
+                |sub| sub as _)
+        }
+    };
+
     let command_name_impl = match &command {
         None => quote!{ ::std::option::Option::None },
         Some(field) => quote!{
@@ -581,6 +632,26 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                     ::std::option::Option::as_ref(&self.#cmd),
                     false, ::gumdrop::Options::help_requested)
             }
+        }
+    };
+
+    let self_usage_impl = match &command {
+        None => quote!{ <Self as ::gumdrop::Options>::usage() },
+        Some(field) => quote!{
+            ::std::option::Option::map_or_else(
+                ::std::option::Option::as_ref(&self.#field),
+                <Self as ::gumdrop::Options>::usage,
+                ::gumdrop::Options::self_usage)
+        }
+    };
+
+    let self_command_list_impl = match &command {
+        None => quote!{ <Self as ::gumdrop::Options>::command_list() },
+        Some(field) => quote!{
+            ::std::option::Option::map_or_else(
+                ::std::option::Option::as_ref(&self.#field),
+                <Self as ::gumdrop::Options>::command_list,
+                ::gumdrop::Options::self_command_list)
         }
     };
 
@@ -626,6 +697,10 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 ::std::result::Result::Ok(_result)
             }
 
+            fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
+                #command_impl
+            }
+
             fn command_name(&self) -> ::std::option::Option<&'static str> {
                 #command_name_impl
             }
@@ -643,12 +718,20 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 #usage
             }
 
+            fn self_usage(&self) -> &'static str {
+                #self_usage_impl
+            }
+
             fn command_list() -> ::std::option::Option<&'static str> {
                 #command_list
             }
 
             fn command_usage(_name: &str) -> ::std::option::Option<&'static str> {
                 #command_usage
+            }
+
+            fn self_command_list(&self) -> ::std::option::Option<&'static str> {
+                #self_command_list_impl
             }
         }
     })
