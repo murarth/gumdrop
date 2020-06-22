@@ -1200,7 +1200,10 @@ impl DefaultOpts {
                     if let Meta::NameValue(nv) = meta {
                         let doc = lit_str(&nv.lit)?;
 
-                        if opts.doc.is_none() {
+                        if let Some(text) = opts.doc.as_mut() {
+                            text.push('\n');
+                            text.push_str(doc.trim_start());
+                        } else {
                             opts.doc = Some(doc.trim_start().to_owned());
                         }
                     }
@@ -1763,13 +1766,17 @@ fn make_usage(help: &Option<String>, free: &[FreeOpt], opts: &[Opt]) -> String {
 
     if let Some(help) = help {
         res.push_str(help);
-        res.push_str("\n\n");
+        res.push('\n');
     }
 
     let width = max_width(free, |opt| opt.width())
         .max(max_width(opts, |opt| opt.width()));
 
     if !free.is_empty() {
+        if !res.is_empty() {
+            res.push('\n');
+        }
+
         res.push_str("Positional arguments:\n");
 
         for opt in free {
