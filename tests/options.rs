@@ -1189,6 +1189,26 @@ Optional arguments:
 }
 
 #[test]
+fn test_doc_help_multiline() {
+    /// type-level help comment
+    /// second line of text
+    #[derive(Options)]
+    struct Opts {
+        /// help comment
+        foo: i32,
+    }
+
+    assert_eq!(Opts::usage(), &"
+type-level help comment
+second line of text
+
+Optional arguments:
+  -f, --foo FOO  help comment"
+        // Skip leading newline
+        [1..]);
+}
+
+#[test]
 fn test_failed_parse_free() {
     #[derive(Options)]
     struct Opts {
