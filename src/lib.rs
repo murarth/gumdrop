@@ -14,7 +14,7 @@
 //! // Each field must either have a `Default` implementation or an inline
 //! // default value provided.
 //! //
-//! // (`Debug` is only derived here for demonstration purposes.)
+//! // (`Debug` is derived here only for demonstration purposes.)
 //! #[derive(Debug, Options)]
 //! struct MyOptions {
 //!     // Contains "free" arguments -- those that are not options.
@@ -24,6 +24,10 @@
 //!
 //!     // Boolean options are treated as flags, taking no additional values.
 //!     // The optional `help` attribute is displayed in `usage` text.
+//!     //
+//!     // A boolean field named `help` is automatically given the `help_flag` attribute.
+//!     // The `parse_args_or_exit` and `parse_args_default_or_exit` functions use help flags
+//!     // to automatically display usage to the user.
 //!     #[options(help = "print help message")]
 //!     help: bool,
 //!
