@@ -89,6 +89,11 @@ use syn::{
 #[cfg(feature = "default_expr")]
 use syn::Expr;
 
+/// Derives the `gumdrop::Options` trait for `struct` and `enum` items.
+///
+/// `#[options(...)]` attributes can be used to control behavior of generated trait
+/// implementation. See [crate-level documentation](index.html) for the full list of
+/// supported options.
 #[proc_macro_derive(Options, attributes(options))]
 pub fn derive_options(input: TokenStream) -> TokenStream {
     let ast: DeriveInput = match syn::parse(input) {

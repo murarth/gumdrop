@@ -320,7 +320,8 @@ pub trait Options {
         opts
     }
 
-    /// Parses arguments from the environment, using the default parsing style.
+    /// Parses arguments from the environment, using the default
+    /// [parsing style](enum.ParsingStyle.html).
     ///
     /// If an error is encountered, the error is printed to `stderr` and the
     /// process will exit with status code `2`.
@@ -334,7 +335,7 @@ pub trait Options {
     }
 
     /// Parses arguments received from the command line,
-    /// using the default parsing style.
+    /// using the default [parsing style](enum.ParsingStyle.html).
     ///
     /// The first argument (the program name) should be omitted.
     fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
@@ -389,6 +390,44 @@ pub trait Options {
 }
 
 /// Controls behavior of free arguments in `Parser`
+///
+/// The [`parse_args_default`] and [`parse_args_default_or_exit`] functions will use the
+/// default parsing style, `AllOptions`.
+///
+/// # Examples
+///
+/// ```
+/// use gumdrop::{Options, ParsingStyle};
+///
+/// #[derive(Options)]
+/// struct MyOptions {
+///     // If the "-o" is parsed as an option, this will be `true`.
+///     option: bool,
+///     // All free (non-option) arguments will be collected into this Vec.
+///     #[options(free)]
+///     free: Vec<String>,
+/// }
+///
+/// // Command line arguments.
+/// let args = &["foo", "-o", "bar"];
+///
+/// // Using the `AllOptions` parsing style, the "-o" argument in the middle of args
+/// // will be parsed as an option.
+/// let opts = MyOptions::parse_args(args, ParsingStyle::AllOptions).unwrap();
+///
+/// assert_eq!(opts.option, true);
+/// assert_eq!(opts.free, vec!["foo", "bar"]);
+///
+/// // Using the `StopAtFirstFree` option, the first non-option argument will terminate
+/// // option parsing. That means "-o" is treated as a free argument.
+/// let opts = MyOptions::parse_args(args, ParsingStyle::StopAtFirstFree).unwrap();
+///
+/// assert_eq!(opts.option, false);
+/// assert_eq!(opts.free, vec!["foo", "-o", "bar"]);
+/// ```
+///
+/// [`parse_args_default`]: fn.parse_args_default.html
+/// [`parse_args_default_or_exit`]: fn.parse_args_default_or_exit.html
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ParsingStyle {
     /// Process all option arguments that appear
@@ -642,7 +681,8 @@ pub fn parse_args<T: Options>(args: &[String], style: ParsingStyle) -> Result<T,
     T::parse_args(args, style)
 }
 
-/// Parses arguments from the command line using the default parsing style.
+/// Parses arguments from the command line using the default
+/// [parsing style](enum.ParsingStyle.html).
 ///
 /// The first argument (the program name) should be omitted.
 pub fn parse_args_default<T: Options>(args: &[String]) -> Result<T, Error> {
@@ -666,7 +706,8 @@ pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
     T::parse_args_or_exit(style)
 }
 
-/// Parses arguments from the environment, using the default parsing style.
+/// Parses arguments from the environment, using the default
+/// [parsing style](enum.ParsingStyle.html).
 ///
 /// If an error is encountered, the error is printed to `stderr` and the
 /// process will exit with status code `2`.
