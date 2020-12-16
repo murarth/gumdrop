@@ -89,6 +89,472 @@ use syn::{
 #[cfg(feature = "default_expr")]
 use syn::Expr;
 
+#[proc_macro_derive(OptionsCore, attributes(options))]
+pub fn derive_options_core(input: TokenStream) -> TokenStream {
+    let ast: DeriveInput = match syn::parse(input) {
+        Ok(ast) => ast,
+        Err(e) => {
+            return e.to_compile_error().into();
+        }
+    };
+
+    let span = ast.ident.span();
+
+    let result = match &ast.data {
+        Data::Enum(data) =>
+            derive_optionscore_enum(&ast, data),
+        Data::Struct(DataStruct{fields: Fields::Unit, ..}) =>
+            Err(Error::new(span, "cannot derive Options for unit struct types")),
+        Data::Struct(DataStruct{fields: Fields::Unnamed(..), ..}) =>
+            Err(Error::new(span, "cannot derive Options for tuple struct types")),
+        Data::Struct(DataStruct{fields, ..}) =>
+            derive_optionscore_struct(&ast, fields),
+        Data::Union(_) =>
+            Err(Error::new(span, "cannot derive Options for union types")),
+    };
+
+    match result {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into()
+    }
+}
+
+fn derive_optionscore_enum(ast: &DeriveInput, data: &DataEnum)
+        -> Result<TokenStream2, Error> {
+    let name = &ast.ident;
+    let mut commands = Vec::new();
+    let mut var_ty = Vec::new();
+
+    for var in &data.variants {
+        let span = var.ident.span();
+
+        let ty = match &var.fields {
+            Fields::Unit | Fields::Named(_) =>
+                return Err(Error::new(span,
+                    "command variants must be unary tuple variants")),
+            Fields::Unnamed(fields) if fields.unnamed.len() != 1 =>
+                return Err(Error::new(span,
+                    "command variants must be unary tuple variants")),
+            Fields::Unnamed(fields) =>
+                &fields.unnamed.first().unwrap().ty,
+        };
+
+        let opts = CmdOpts::parse(&var.attrs)?;
+
+        let var_name = &var.ident;
+
+        var_ty.push(ty);
+
+        commands.push(Cmd{
+            name: opts.name.unwrap_or_else(
+                || make_command_name(&var_name.to_string())),
+            help: opts.help.or(opts.doc),
+            variant_name: var_name,
+            ty: ty,
+        });
+    }
+
+    let mut command = Vec::new();
+    let mut handle_cmd = Vec::new();
+    let mut help_req_impl = Vec::new();
+    let mut variant = Vec::new();
+
+    for cmd in commands {
+        command.push(cmd.name);
+
+        let var_name = cmd.variant_name;
+        let ty = &cmd.ty;
+
+        variant.push(var_name);
+
+        handle_cmd.push(quote!{
+            #name::#var_name(<#ty as ::gumdrop::OptionsCore>::parse(_parser)?)
+        });
+
+        help_req_impl.push(quote!{
+            #name::#var_name(cmd) => { ::gumdrop::OptionsCore::help_requested(cmd) }
+        });
+    }
+
+    // Borrow re-used items
+    let command = &command;
+
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    Ok(quote!{
+        impl #impl_generics ::gumdrop::OptionsCore for #name #ty_generics #where_clause {
+            fn parse<__S: ::std::convert::AsRef<str>>(
+                    _parser: &mut ::gumdrop::Parser<__S>)
+                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                let _arg = _parser.next_arg()
+                    .ok_or_else(::gumdrop::Error::missing_command)?;
+
+                Self::parse_command(_arg, _parser)
+            }
+
+            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+                    _parser: &mut ::gumdrop::Parser<__S>)
+                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                let cmd = match name {
+                    #( #command => { #handle_cmd } )*
+                    _ => return ::std::result::Result::Err(
+                        ::gumdrop::Error::unrecognized_command(name))
+                };
+
+                ::std::result::Result::Ok(cmd)
+            }
+        }
+    })
+}
+
+fn derive_optionscore_struct(
+    ast: &DeriveInput,
+    fields: &Fields
+) -> Result<TokenStream2, Error> {
+    let mut pattern = Vec::new();
+    let mut handle_opt = Vec::new();
+    let mut short_names = Vec::new();
+    let mut long_names = Vec::new();
+    let mut free: Vec<FreeOpt> = Vec::new();
+    let mut required = Vec::new();
+    let mut required_err = Vec::new();
+    let mut command = None;
+    let mut command_required = false;
+    let mut help_flag = Vec::new();
+    let mut options = Vec::new();
+    let mut field_name = Vec::new();
+    let mut default = Vec::new();
+
+    let default_expr = quote!{ ::std::default::Default::default() };
+    let default_opts = DefaultOpts::parse(&ast.attrs)?;
+
+    for field in fields {
+        let span = field.ident.as_ref().unwrap().span();
+
+        let mut opts = AttrOpts::parse(span, &field.attrs)?;
+        opts.set_defaults(&default_opts);
+
+        let ident = field.ident.as_ref().unwrap();
+
+        field_name.push(ident);
+
+        if let Some(expr) = &opts.default {
+            default.push(opts.parse.as_ref()
+                .unwrap_or(&ParseFn::Default)
+                .make_parse_default_action(ident, &expr));
+        } else {
+            #[cfg(not(feature = "default_expr"))]
+            default.push(default_expr.clone());
+
+            #[cfg(feature = "default_expr")]
+            {
+                if let Some(expr) = &opts.default_expr {
+                    default.push(quote!{ #expr });
+                } else {
+                    default.push(default_expr.clone());
+                }
+            }
+        }
+
+        if opts.command {
+            if command.is_some() {
+                return Err(Error::new(span,
+                    "duplicate declaration of `command` field"));
+            }
+            if !free.is_empty() {
+                return Err(Error::new(span,
+                    "`command` and `free` options are mutually exclusive"));
+            }
+
+            command = Some(ident);
+            command_required = opts.required;
+
+            if opts.required {
+                required.push(ident);
+                required_err.push(quote!{
+                    ::gumdrop::Error::missing_required_command() });
+            }
+
+            continue;
+        }
+
+        if opts.free {
+            if command.is_some() {
+                return Err(Error::new(span,
+                    "`command` and `free` options are mutually exclusive"));
+            }
+
+            if let Some(last) = free.last() {
+                if last.action.is_push() {
+                    return Err(Error::new(span,
+                        "only the final `free` option may be of type `Vec<T>`"));
+                }
+            }
+
+            if opts.required {
+                required.push(ident);
+                required_err.push(quote!{
+                    ::gumdrop::Error::missing_required_free() });
+            }
+
+            free.push(FreeOpt{
+                field: ident,
+                action: FreeAction::infer(&field.ty, &opts),
+                parse: opts.parse.unwrap_or_default(),
+                required: opts.required,
+                help: opts.help.or(opts.doc),
+            });
+
+            continue;
+        }
+
+        if opts.long.is_none() && !opts.no_long {
+            opts.long = Some(make_long_name(&ident.to_string()));
+        }
+
+        if let Some(long) = &opts.long {
+            validate_long_name(span, long, &long_names)?;
+            long_names.push(long.clone());
+        }
+
+        if let Some(short) = opts.short {
+            validate_short_name(span, short, &short_names)?;
+            short_names.push(short);
+        }
+
+        if opts.help_flag || (!opts.no_help_flag &&
+                opts.long.as_ref().map(|s| &s[..]) == Some("help")) {
+            help_flag.push(ident);
+        }
+
+        let action = if opts.count {
+            Action::Count
+        } else {
+            Action::infer(&field.ty, &opts)
+        };
+
+        if action.takes_arg() {
+            if opts.meta.is_none() {
+                opts.meta = Some(make_meta(&ident.to_string(), &action));
+            }
+        } else if opts.meta.is_some() {
+            return Err(Error::new(span,
+                "`meta` value is invalid for this field"));
+        }
+
+        options.push(Opt{
+            field: ident,
+            action: action,
+            long: opts.long,
+            short: opts.short,
+            no_short: opts.no_short,
+            required: opts.required,
+            meta: opts.meta,
+            help: opts.help.or(opts.doc),
+            default: opts.default,
+        });
+    }
+
+    // do not make short automatically
+    // only if user explicitly requested short options
+
+    for opt in &options {
+        if opt.required {
+            required.push(opt.field);
+            let display = opt.display_form();
+            required_err.push(quote!{
+                ::gumdrop::Error::missing_required(#display) });
+        }
+
+        let pat = match (&opt.long, opt.short) {
+            (Some(long), Some(short)) => quote!{
+                ::gumdrop::Opt::Long(#long) | ::gumdrop::Opt::Short(#short)
+            },
+            (Some(long), None) => quote!{
+                ::gumdrop::Opt::Long(#long)
+            },
+            (None, Some(short)) => quote!{
+                ::gumdrop::Opt::Short(#short)
+            },
+            (None, None) => {
+                return Err(Error::new(opt.field.span(),
+                    "option has no long or short flags"));
+            }
+        };
+
+        pattern.push(pat);
+        handle_opt.push(opt.make_action());
+
+        if let Some(long) = &opt.long {
+            let (pat, handle) = if let Some(n) = opt.action.tuple_len() {
+                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                    quote!{ return ::std::result::Result::Err(
+                        ::gumdrop::Error::unexpected_single_argument(_opt, #n)) })
+            } else if opt.action.takes_arg() {
+                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _arg) },
+                    opt.make_action_arg())
+            } else {
+                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                    quote!{ return ::std::result::Result::Err(
+                        ::gumdrop::Error::unexpected_argument(_opt)) })
+            };
+
+            pattern.push(pat);
+            handle_opt.push(handle);
+        }
+    }
+
+    let name = &ast.ident;
+
+    let handle_free = if !free.is_empty() {
+        let catch_all = if free.last().unwrap().action.is_push() {
+            let last = free.pop().unwrap();
+
+            let free = last.field;
+            let name = free.to_string();
+            let meth = match &last.action {
+                FreeAction::Push(meth) => meth,
+                _ => unreachable!()
+            };
+
+            let parse = last.parse.make_parse_action(Some(&name[..]));
+            let mark_used = last.mark_used();
+
+            quote!{
+                #mark_used
+                let _arg = _free;
+                _result.#free.#meth(#parse);
+            }
+        } else {
+            quote!{
+                // ignore unrecognized frees
+                // return ::std::result::Result::Err(
+                //     ::gumdrop::Error::unexpected_free(_free))
+            }
+        };
+
+        let num = 0..free.len();
+        let action = free.iter().map(|free| {
+            let field = free.field;
+            let name = field.to_string();
+
+            let mark_used = free.mark_used();
+            let parse = free.parse.make_parse_action(Some(&name[..]));
+
+            let assign = match &free.action {
+                FreeAction::Push(meth) => quote!{
+                    let _arg = _free;
+                    _result.#field.#meth(#parse);
+                },
+                FreeAction::SetField => quote!{
+                    let _arg = _free;
+                    _result.#field = #parse;
+                },
+                FreeAction::SetOption => quote!{
+                    let _arg = _free;
+                    _result.#field = ::std::option::Option::Some(#parse);
+                },
+            };
+
+            quote!{
+                #mark_used
+                #assign
+            }
+        }).collect::<Vec<_>>();
+
+        quote!{
+            match _free_counter {
+                #( #num => {
+                    _free_counter += 1;
+                    #action
+                } )*
+                _ => { #catch_all }
+            }
+        }
+    } else if let Some(ident) = command {
+        let mark_used = if command_required {
+            quote!{
+                _used.#ident = true;
+            }
+        } else {
+            quote!{
+            }
+        };
+
+        quote!{
+            #mark_used
+            _result.#ident = ::std::option::Option::Some(
+                ::gumdrop::OptionsCore::parse_command(_free, _parser)?);
+            break;
+        }
+    } else {
+        quote!{
+            // I dont think we should error on an
+            // unexpected free positional
+            // return ::std::result::Result::Err(
+            //     ::gumdrop::Error::unexpected_free(_free));
+        }
+    };
+
+    let required = &required;
+
+    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
+
+    Ok(quote!{
+        impl #impl_generics ::gumdrop::OptionsCore for #name #ty_generics #where_clause {
+            fn parse<__S: ::std::convert::AsRef<str>>(
+                    _parser: &mut ::gumdrop::Parser<__S>)
+                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                #[derive(Default)]
+                struct _Used {
+                    #( #required: bool , )*
+                }
+
+                let mut _result = #name{
+                    #( #field_name: #default ),*
+                };
+                let mut _free_counter = 0usize;
+                let mut _used = _Used::default();
+
+                while let ::std::option::Option::Some(_opt) = _parser.next_opt() {
+                    match _opt {
+                        #( #pattern => {
+                            #handle_opt
+                        } )*
+                        ::gumdrop::Opt::Free(_free) => {
+                            #handle_free
+                        }
+                        _ => {
+                            // I dont think its a good idea to error if
+                            // we found unrecognized input. maybe give a warning?
+                            // return ::std::result::Result::Err(
+                            //     ::gumdrop::Error::unrecognized_option(_opt));
+                        }
+                    }
+                }
+
+                if true #( && !_result.#help_flag )* {
+                    #( if !_used.#required {
+                        return ::std::result::Result::Err(#required_err);
+                    } )*
+                }
+
+                ::std::result::Result::Ok(_result)
+            }
+
+            fn parse_command<__S: ::std::convert::AsRef<str>>(
+                name: &str,
+                _parser: &mut ::gumdrop::Parser<__S>
+            ) -> ::std::result::Result<Self, ::gumdrop::Error> {
+                ::std::result::Result::Err(
+                    ::gumdrop::Error::unrecognized_command(name)
+                )
+            }
+        }
+    })
+}
+
+
 /// Derives the `gumdrop::Options` trait for `struct` and `enum` items.
 ///
 /// `#[options(...)]` attributes can be used to control behavior of generated trait

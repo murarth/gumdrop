@@ -389,6 +389,44 @@ pub trait Options {
     fn self_command_list(&self) -> Option<&'static str>;
 }
 
+/// Implements a set of options parsed from command line arguments.
+///
+/// An implementation of this trait can be generated with `#[derive(OptionsCore)]`.
+/// Unlike the `Options` trait, OptionsCore has fewer features,
+/// and a few changes to its parsing. The primary differences are:
+/// - OptionsCore does not have usage
+/// - OptionsCore has no methods for printing usage/exiting
+/// - OptionsCore does not treat unknown options as errors
+/// - OptionsCore does not treat extra free positional arguments as errors
+/// - OptionsCore does not implicitly treat "-h" or "--help" as a special variable
+/// - OptionsCore does not use the first letter of a field as the short form
+pub trait OptionsCore {
+    /// Parses arguments until the given parser is exhausted or until
+    /// an error is encountered.
+    /// This method is auto-implemented if you use the #[derive(OptionsCore)]
+    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+
+    /// Parses options for the named command.
+    /// This method is auto-implemented if you use the #[derive(OptionsCore)]
+    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+
+    /// Parses arguments received from the command line.
+    ///
+    /// The first argument (the program name) should be omitted.
+    fn parse_args<S: AsRef<str>>(args: &[S], style: ParsingStyle) -> Result<Self, Error>
+            where Self: Sized {
+        Self::parse(&mut Parser::new(args, style))
+    }
+
+    /// Parses arguments received from the command line,
+    /// using the default [parsing style](enum.ParsingStyle.html).
+    ///
+    /// The first argument (the program name) should be omitted.
+    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
+        Self::parse(&mut Parser::new(args, ParsingStyle::default()))
+    }
+}
+
 /// Controls behavior of free arguments in `Parser`
 ///
 /// The [`parse_args_default`] and [`parse_args_default_or_exit`] functions will use the
