@@ -170,10 +170,17 @@
 
 pub use gumdrop_derive::*;
 
+use std::borrow::Cow;
 use std::error::Error as StdError;
+use std::ffi::OsStr;
 use std::fmt;
 use std::slice::Iter;
 use std::str::Chars;
+
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
@@ -194,6 +201,7 @@ enum ErrorKind {
         expected: usize,
         found: usize,
     },
+    InvalidUtf8(String),
     MissingArgument(String),
     MissingCommand,
     MissingRequired(String),
@@ -223,9 +231,9 @@ pub enum Opt<'a> {
     /// Long option, e.g. `--option`
     Long(&'a str),
     /// Long option with argument, e.g. `--option=value`
-    LongWithArg(&'a str, &'a str),
+    LongWithArg(&'a str, &'a OsStr),
     /// Free argument
-    Free(&'a str),
+    Free(&'a OsStr),
 }
 
 /// Implements a set of options parsed from command line arguments.
@@ -234,7 +242,7 @@ pub enum Opt<'a> {
 pub trait Options {
     /// Parses arguments until the given parser is exhausted or until
     /// an error is encountered.
-    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+    fn parse<S: AsRef<OsStr>>(parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
 
     /// Returns the subcommand instance, if present.
     ///
@@ -262,7 +270,7 @@ pub trait Options {
     /// Parses arguments received from the command line.
     ///
     /// The first argument (the program name) should be omitted.
-    fn parse_args<S: AsRef<str>>(args: &[S], style: ParsingStyle) -> Result<Self, Error>
+    fn parse_args<S: AsRef<OsStr>>(args: &[S], style: ParsingStyle) -> Result<Self, Error>
             where Self: Sized {
         Self::parse(&mut Parser::new(args, style))
     }
@@ -277,13 +285,14 @@ pub trait Options {
     ///
     /// Otherwise, the parsed options are returned.
     fn parse_args_or_exit(style: ParsingStyle) -> Self where Self: Sized {
-        use std::env::args;
+        use std::env::args_os;
         use std::process::exit;
 
-        let args = args().collect::<Vec<_>>();
+        let args = args_os().collect::<Vec<_>>();
+        let program_name = args[0].to_string_lossy();
 
         let opts = Self::parse_args(&args[1..], style).unwrap_or_else(|e| {
-            eprintln!("{}: {}", args[0], e);
+            eprintln!("{}: {}", program_name, e);
             exit(2);
         });
 
@@ -304,7 +313,7 @@ pub trait Options {
                 }
             }
 
-            println!("Usage: {}{} [OPTIONS]", args[0], command_str);
+            println!("Usage: {}{} [OPTIONS]", program_name, command_str);
             println!();
             println!("{}", command.self_usage());
 
@@ -338,12 +347,12 @@ pub trait Options {
     /// using the default [parsing style](enum.ParsingStyle.html).
     ///
     /// The first argument (the program name) should be omitted.
-    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
+    fn parse_args_default<S: AsRef<OsStr>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
         Self::parse(&mut Parser::new(args, ParsingStyle::default()))
     }
 
     /// Parses options for the named command.
-    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+    fn parse_command<S: AsRef<OsStr>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
 
     /// Returns a string showing usage and help for each supported option.
     ///
@@ -437,6 +446,27 @@ pub enum ParsingStyle {
     StopAtFirstFree,
 }
 
+/// Argument after parsing from `OsStr`, similar to `Opt` but for parsing a
+/// single argument which may contain multiple short options or only part of a
+/// long option.
+enum Arg<'a> {
+    DoubleDash,
+    Long(&'a str),
+    LongWithArg(&'a str, &'a OsStr),
+    Short(Chars<'a>),
+    Free(&'a OsStr),
+}
+
+/// Extension of `OsStr` that uses platform-specific behavior to parse it as an
+/// argument.
+///
+/// Not on all platforms can `--valid-utf8=invalid-utf8` be transformed into
+/// `Ok(Arg::Long(_, _))`; `Error::InvalidUtf8(_)` will be returned instead.
+trait OsStrArg {
+    /// Parse `OsStr` as an argument
+    fn arg(&self) -> Result<Arg, Error>;
+}
+
 impl Error {
     /// Returns an error for a failed attempt at parsing an option value.
     pub fn failed_parse(opt: Opt, err: String) -> Error {
@@ -462,6 +492,11 @@ impl Error {
             expected: expected,
             found: found,
         }}
+    }
+
+    /// Returns an error for an argument being invalid UTF-8.
+    pub fn invalid_utf8(invalid: String) -> Error {
+        Error{kind: ErrorKind::InvalidUtf8(invalid)}
     }
 
     /// Returns an error for an option receiving an unexpected argument value,
@@ -505,8 +540,8 @@ impl Error {
 
     /// Returns an error when a free argument was encountered, but the options
     /// type does not support free arguments.
-    pub fn unexpected_free(arg: &str) -> Error {
-        Error{kind: ErrorKind::UnexpectedFree(arg.to_owned())}
+    pub fn unexpected_free(arg: &OsStr) -> Error {
+        Error{kind: ErrorKind::UnexpectedFree(arg.to_string_lossy().into_owned())}
     }
 
     /// Returns an error for an unrecognized command.
@@ -545,6 +580,7 @@ impl fmt::Display for Error {
             InsufficientArguments{option, expected, found} =>
                 write!(f, "insufficient arguments to option `{}`: expected {}; found {}",
                     option, expected, found),
+            InvalidUtf8(s) => write!(f, "invalid UTF-8: {}", s),
             MissingArgument(opt) => write!(f, "missing argument to option `{}`", opt),
             MissingCommand => f.write_str("missing command name"),
             MissingRequired(opt) => write!(f, "missing required option `{}`", opt),
@@ -567,7 +603,7 @@ impl StdError for Error {
     }
 }
 
-impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
+impl<'a, S: 'a + AsRef<OsStr>> Parser<'a, S> {
     /// Returns a new parser for the given series of arguments.
     ///
     /// The given slice should **not** contain the program name as its first
@@ -582,61 +618,49 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
     }
 
     /// Returns the next option or `None` if no options remain.
-    pub fn next_opt(&mut self) -> Option<Opt<'a>> {
+    pub fn next_opt(&mut self) -> Option<Result<Opt<'a>, Error>> {
         if let Some(mut cur) = self.cur.take() {
             if let Some(opt) = cur.next() {
                 self.cur = Some(cur);
-                return Some(Opt::Short(opt));
+                return Some(Ok(Opt::Short(opt)));
             }
         }
 
         if self.terminated {
-            return self.args.next().map(|s| Opt::Free(s.as_ref()));
+            return self.args.next().map(|s| Ok(Opt::Free(s.as_ref())));
         }
 
-        match self.args.next().map(|s| s.as_ref()) {
-            Some(arg @ "-") => {
-                if self.style == ParsingStyle::StopAtFirstFree {
-                    self.terminated = true;
-                }
-                Some(Opt::Free(arg))
-            }
-            Some("--") => {
+        match self.args.next().map(|s| s.as_ref().arg()) {
+            Some(Ok(Arg::DoubleDash)) => {
                 self.terminated = true;
-                self.args.next().map(|s| Opt::Free(s.as_ref()))
+                self.args.next().map(|s| Ok(Opt::Free(s.as_ref())))
             }
-            Some(long) if long.starts_with("--") => {
-                match long.find('=') {
-                    Some(pos) => Some(Opt::LongWithArg(
-                        &long[2..pos], &long[pos + 1..])),
-                    None => Some(Opt::Long(&long[2..]))
-                }
-            }
-            Some(short) if short.starts_with('-') => {
-                let mut chars = short[1..].chars();
-
-                let res = chars.next().map(Opt::Short);
+            Some(Ok(Arg::Long(opt))) => Some(Ok(Opt::Long(opt))),
+            Some(Ok(Arg::LongWithArg(opt, val))) => Some(Ok(Opt::LongWithArg(opt, val))),
+            Some(Ok(Arg::Short(mut chars))) => {
+                let res = chars.next().map(Opt::Short).map(Ok);
 
                 self.cur = Some(chars);
                 res
             }
-            Some(free) => {
+            Some(Ok(Arg::Free(free))) => {
                 if self.style == ParsingStyle::StopAtFirstFree {
                     self.terminated = true;
                 }
-                Some(Opt::Free(free))
+                Some(Ok(Opt::Free(free)))
             }
+            Some(Err(err)) => Some(Err(err)),
             None => None
         }
     }
 
     /// Returns the next argument to an option or `None` if none remain.
-    pub fn next_arg(&mut self) -> Option<&'a str> {
+    pub fn next_arg(&mut self) -> Option<&'a OsStr> {
         if let Some(cur) = self.cur.take() {
             let arg = cur.as_str();
 
             if !arg.is_empty() {
-                return Some(arg);
+                return Some(arg.as_ref());
             }
         }
 
@@ -671,6 +695,113 @@ impl Default for ParsingStyle {
     /// Returns the default parsing style, `AllOptions`.
     fn default() -> ParsingStyle {
         ParsingStyle::AllOptions
+    }
+}
+
+// TODO the OsStrExt of unix is also present for some non-unix platforms, those
+// should also use this implementation.
+#[cfg(unix)]
+impl OsStrArg for OsStr {
+    fn arg(&self) -> Result<Arg, Error> {
+        let bytes = self.as_bytes();
+        Ok(match bytes {
+            b"-" => Arg::Free(self),
+            b"--" => Arg::DoubleDash,
+            long if long.starts_with(b"--") => {
+                let bytes = &bytes[2..];
+                match bytes.iter().position(|&x| x == b'=') {
+                    Some(pos) => {
+                        let (opt, arg) = bytes.split_at(pos);
+                        Arg::LongWithArg(bytes_to_str(opt)?, OsStr::from_bytes(&arg[1..]))
+                    }
+                    None => Arg::Long(bytes_to_str(bytes)?),
+                }
+            },
+            short if short.starts_with(b"-") => arg_short(self)?,
+            _free => Arg::Free(self),
+        })
+    }
+}
+
+#[cfg(windows)]
+impl OsStrArg for OsStr {
+    fn arg(&self) -> Result<Arg, Error> {
+        let mut wide = self.encode_wide();
+        Ok(match wide.next() {
+            // b'-' as u16 == 0x002D
+            Some(0x002D) => match wide.next() {
+                Some(0x002D) => match wide.next() {
+                    // TODO Using encode_wide/decode_wide,
+                    // `--valid-utf8=invalid-utf8` can be turned into
+                    // `Arg::Long(Cow<str>, Cow<OsStr>)`; note the need to use
+                    // `Cow` which is not currently used here.
+                    Some(_) => arg_long(self.to_string_lossy())?,
+                    None => Arg::DoubleDash,
+                },
+                Some(_) => arg_short(self)?,
+                None => Arg::Free(self),
+            },
+            _ => Arg::Free(self),
+        })
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+impl OsStrArg for OsStr {
+    fn arg(&self) -> Result<Arg, Error> {
+        let lossy = self.to_string_lossy();
+        Ok(match lossy.as_ref() {
+            "-" => Arg::Free(self),
+            "--" => Arg::DoubleDash,
+            long if long.starts_with("--") => arg_long(lossy)?,
+            short if short.starts_with('-') => arg_short(self)?,
+            _free => Arg::Free(self),
+        })
+    }
+}
+
+/// Parse short argument.
+fn arg_short(s: &OsStr) -> Result<Arg, Error> {
+    Ok(Arg::Short(to_str(s)?[1..].chars()))
+}
+
+/// Parse long argument.
+///
+/// For options like `--valid-utf8=invalid-utf8` `Error::InvalidUtf8` is
+/// returned as `OsStr` cannot be split or truncated without a platform-specific
+/// `OsStrExt`.
+#[cfg(not(unix))]
+fn arg_long(s: Cow<str>) -> Result<Arg, Error> {
+    match s {
+        Cow::Owned(s) => Err(Error::invalid_utf8(s)),
+        Cow::Borrowed(s) => {
+            match s.find('=') {
+                Some(pos) => Ok(Arg::LongWithArg(&s[2..pos], OsStr::new(&s[pos + 1..]))),
+                None => Ok(Arg::Long(&s[2..])),
+            }
+        }
+    }
+}
+
+/// Try to convert `&[u8]` (byte-representation of `&OsStr`) to `&str`.
+#[cfg(unix)]
+fn bytes_to_str(s: &[u8]) -> Result<&str, Error> {
+    cow_to_str(String::from_utf8_lossy(s))
+}
+
+/// Try to convert `&OsStr` to `&str`.
+#[doc(hidden)]
+pub fn to_str(s: &OsStr) -> Result<&str, Error> {
+    cow_to_str(s.to_string_lossy())
+}
+
+/// Try to convert `Cow` to `&str`, assuming that an owned `Cow` means that some
+/// characters had to be replaced with the replacement character due to invalid
+/// UTF-8.
+fn cow_to_str(s: Cow<str>) -> Result<&str, Error> {
+    match s {
+        Cow::Owned(s) => Err(Error::invalid_utf8(s)),
+        Cow::Borrowed(s) => Ok(s),
     }
 }
 
@@ -736,18 +867,18 @@ mod test {
 
         let mut p = Parser::new(args, ParsingStyle::AllOptions);
 
-        assert_matches!(p.next_opt(), Some(Opt::Short('a')));
-        assert_matches!(p.next_opt(), Some(Opt::Free("b")));
-        assert_matches!(p.next_opt(), Some(Opt::Short('c')));
-        assert_matches!(p.next_opt(), Some(Opt::Short('d')));
-        assert_matches!(p.next_opt(), Some(Opt::Short('e')));
-        assert_matches!(p.next_arg(), Some("arg"));
-        assert_matches!(p.next_opt(), Some(Opt::Short('x')));
-        assert_matches!(p.next_arg(), Some("foo"));
-        assert_matches!(p.next_opt(), Some(Opt::Long("long")));
-        assert_matches!(p.next_opt(), Some(Opt::LongWithArg("opt", "val")));
-        assert_matches!(p.next_opt(), Some(Opt::Free("y")));
-        assert_matches!(p.next_opt(), Some(Opt::Free("-z")));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('a'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(b))) if b == "b");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('c'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('d'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('e'))));
+        assert_matches!(p.next_arg(), Some(arg) if arg == "arg");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('x'))));
+        assert_matches!(p.next_arg(), Some(foo) if foo == "foo");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Long("long"))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("opt", val))) if val == "val");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(y))) if y == "y");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(z))) if z == "-z");
         assert_matches!(p.next_opt(), None);
     }
 
@@ -757,18 +888,70 @@ mod test {
 
         let mut p = Parser::new(args, ParsingStyle::AllOptions);
 
-        assert_matches!(p.next_opt(), Some(Opt::Short('a')));
-        assert_matches!(p.next_opt(), Some(Opt::Free("b")));
-        assert_matches!(p.next_opt(), Some(Opt::Short('c')));
-        assert_matches!(p.next_opt(), Some(Opt::Long("d")));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('a'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(b))) if b == "b");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('c'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Long("d"))));
         assert_matches!(p.next_opt(), None);
 
         let mut p = Parser::new(args, ParsingStyle::StopAtFirstFree);
 
-        assert_matches!(p.next_opt(), Some(Opt::Short('a')));
-        assert_matches!(p.next_opt(), Some(Opt::Free("b")));
-        assert_matches!(p.next_opt(), Some(Opt::Free("-c")));
-        assert_matches!(p.next_opt(), Some(Opt::Free("--d")));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Short('a'))));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(b))) if b == "b");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(c))) if c == "-c");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(d))) if d == "--d");
+        assert_matches!(p.next_opt(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_os_str() {
+        use super::{Error, ErrorKind, OsStr, OsStrExt};
+
+        let invalid = [b'-', b'-', b'f', b'o', 0x80, b'o'];
+        let invalid_long = OsStr::from_bytes(&invalid[..]);
+        let invalid_short = OsStr::from_bytes(&invalid[1..]);
+        let valid_free = OsStr::from_bytes(&invalid[2..]);
+        let invalid = [b'-', b'-', b'f', b'=', b'o', 0x80, b'o'];
+        let valid_long = OsStr::from_bytes(&invalid[..]);
+        let valid_arg = OsStr::from_bytes(&invalid[4..]);
+
+        let args = &[invalid_long, invalid_short, valid_free, valid_long];
+
+        let mut p = Parser::new(args, ParsingStyle::AllOptions);
+
+        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
+        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("f", arg))) if arg == valid_arg);
+        assert_matches!(p.next_opt(), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_os_str() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        use super::{Error, ErrorKind};
+
+        let invalid = [0x002D, 0x002D, 0x0066, 0x006F, 0xD800, 0x006F];
+        let invalid_long = OsString::from_wide(&invalid[..]);
+        let invalid_short = OsString::from_wide(&invalid[1..]);
+        let valid_free = OsString::from_wide(&invalid[2..]);
+        let invalid = [0x002D, 0x002D, 0x0066, 0x003D, 0x006F, 0xD800, 0x006F];
+        let valid_long = OsString::from_wide(&invalid[..]);
+        // let valid_arg = OsString::from_wide(&invalid[4..]);
+
+        let args = &[&invalid_long, &invalid_short, &valid_free, &valid_long];
+
+        let mut p = Parser::new(args, ParsingStyle::AllOptions);
+
+        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
+        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
+        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
+        // That last one should ideally be the following:
+        // assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("f", arg))) if arg == valid_arg);
         assert_matches!(p.next_opt(), None);
     }
 }

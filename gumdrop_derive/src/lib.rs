@@ -229,13 +229,13 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 let _arg = _parser.next_arg()
                     .ok_or_else(::gumdrop::Error::missing_command)?;
 
-                Self::parse_command(_arg, _parser)
+                Self::parse_command(::gumdrop::to_str(_arg)?, _parser)
             }
 
             fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
@@ -252,7 +252,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 }
             }
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 let cmd = match name {
@@ -577,7 +577,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         quote!{
             #mark_used
             _result.#ident = ::std::option::Option::Some(
-                ::gumdrop::Options::parse_command(_free, _parser)?);
+                ::gumdrop::Options::parse_command(::gumdrop::to_str(_free)?, _parser)?);
             break;
         }
     } else {
@@ -666,7 +666,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 #[derive(Default)]
@@ -681,6 +681,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 let mut _used = _Used::default();
 
                 while let ::std::option::Option::Some(_opt) = _parser.next_opt() {
+                    let _opt = _opt?;
                     match _opt {
                         #( #pattern => { #handle_opt } )*
                         ::gumdrop::Opt::Free(_free) => {
@@ -712,7 +713,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
             #help_requested_impl
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 ::std::result::Result::Err(
@@ -1512,18 +1513,18 @@ impl ParseFn {
 
         let res = match self {
             ParseFn::Default => quote!{
-                ::std::str::FromStr::from_str(_arg)
+                ::std::str::FromStr::from_str(::gumdrop::to_str(_arg)?)
                     .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
                         #name, ::std::string::ToString::to_string(&e)))?
             },
             ParseFn::FromStr(None) => quote!{
-                ::std::convert::From::from(_arg)
+                ::std::convert::From::from(::gumdrop::to_str(_arg)?)
             },
             ParseFn::FromStr(Some(fun)) => quote!{
-                #fun(_arg)
+                #fun(::gumdrop::to_str(_arg)?)
             },
             ParseFn::TryFromStr(fun) => quote!{
-                #fun(_arg)
+                #fun(::gumdrop::to_str(_arg)?)
                     .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
                         #name, ::std::string::ToString::to_string(&e)))?
             }
