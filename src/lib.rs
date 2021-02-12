@@ -177,11 +177,6 @@ use std::fmt;
 use std::slice::Iter;
 use std::str::Chars;
 
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
-
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
 pub struct Error {
@@ -224,14 +219,14 @@ pub struct Parser<'a, S: 'a> {
 }
 
 /// Represents an option parsed from a `Parser`
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Opt<'a> {
     /// Short option, e.g. `-o`
     Short(char),
     /// Long option, e.g. `--option`
     Long(&'a str),
     /// Long option with argument, e.g. `--option=value`
-    LongWithArg(&'a str, &'a OsStr),
+    LongWithArg(Cow<'a, str>, Cow<'a, OsStr>),
     /// Free argument
     Free(&'a OsStr),
 }
@@ -452,7 +447,7 @@ pub enum ParsingStyle {
 enum Arg<'a> {
     DoubleDash,
     Long(&'a str),
-    LongWithArg(&'a str, &'a OsStr),
+    LongWithArg(Cow<'a, str>, Cow<'a, OsStr>),
     Short(Chars<'a>),
     Free(&'a OsStr),
 }
@@ -469,7 +464,7 @@ trait OsStrArg {
 
 impl Error {
     /// Returns an error for a failed attempt at parsing an option value.
-    pub fn failed_parse(opt: Opt, err: String) -> Error {
+    pub fn failed_parse(opt: &Opt, err: String) -> Error {
         Error{kind: ErrorKind::FailedParse(opt.to_string(), err)}
     }
 
@@ -486,7 +481,7 @@ impl Error {
 
     /// Returns an error for an option expecting two or more arguments not
     /// receiving the expected number of arguments.
-    pub fn insufficient_arguments(opt: Opt, expected: usize, found: usize) -> Error {
+    pub fn insufficient_arguments(opt: &Opt, expected: usize, found: usize) -> Error {
         Error{kind: ErrorKind::InsufficientArguments{
             option: opt.to_string(),
             expected: expected,
@@ -501,7 +496,7 @@ impl Error {
 
     /// Returns an error for an option receiving an unexpected argument value,
     /// e.g. `--option=value`.
-    pub fn unexpected_argument(opt: Opt) -> Error {
+    pub fn unexpected_argument(opt: &Opt) -> Error {
         Error{kind: ErrorKind::UnexpectedArgument(opt.to_string())}
     }
 
@@ -509,12 +504,12 @@ impl Error {
     /// receiving only one in the long form, e.g. `--option=value`.
     ///
     /// These options must be passed as, e.g. `--option value second-value [...]`.
-    pub fn unexpected_single_argument(opt: Opt, n: usize) -> Error {
+    pub fn unexpected_single_argument(opt: &Opt, n: usize) -> Error {
         Error{kind: ErrorKind::UnexpectedSingleArgument(opt.to_string(), n)}
     }
 
     /// Returns an error for a missing required argument.
-    pub fn missing_argument(opt: Opt) -> Error {
+    pub fn missing_argument(opt: &Opt) -> Error {
         Error{kind: ErrorKind::MissingArgument(opt.to_string())}
     }
 
@@ -550,11 +545,11 @@ impl Error {
     }
 
     /// Returns an error for an unrecognized option.
-    pub fn unrecognized_option(opt: Opt) -> Error {
+    pub fn unrecognized_option(opt: &Opt) -> Error {
         match opt {
-            Opt::Short(short) => Error::unrecognized_short(short),
-            Opt::Long(long) | Opt::LongWithArg(long, _) =>
-                Error::unrecognized_long(long),
+            Opt::Short(short) => Error::unrecognized_short(*short),
+            Opt::Long(long) => Error::unrecognized_long(long),
+            Opt::LongWithArg(long, _) => Error::unrecognized_long(long),
             Opt::Free(_) => panic!("`Error::unrecognized_option` called with `Opt::Free` value")
         }
     }
@@ -682,7 +677,7 @@ impl<'a, S: 'a> Clone for Parser<'a, S> {
 impl<'a> Opt<'a> {
     #[doc(hidden)]
     pub fn to_string(&self) -> String {
-        match *self {
+        match self {
             Opt::Short(ch) => format!("-{}", ch),
             Opt::Long(s) => format!("--{}", s),
             Opt::LongWithArg(opt, _) => format!("--{}", opt),
@@ -703,84 +698,107 @@ impl Default for ParsingStyle {
 #[cfg(unix)]
 impl OsStrArg for OsStr {
     fn arg(&self) -> Result<Arg, Error> {
+        use std::os::unix::ffi::OsStrExt;
+
         let bytes = self.as_bytes();
-        Ok(match bytes {
-            b"-" => Arg::Free(self),
-            b"--" => Arg::DoubleDash,
+        match bytes {
+            b"-" => Ok(Arg::Free(self)),
+            b"--" => Ok(Arg::DoubleDash),
             long if long.starts_with(b"--") => {
                 let bytes = &bytes[2..];
                 match bytes.iter().position(|&x| x == b'=') {
                     Some(pos) => {
                         let (opt, arg) = bytes.split_at(pos);
-                        Arg::LongWithArg(bytes_to_str(opt)?, OsStr::from_bytes(&arg[1..]))
+                        Ok(Arg::LongWithArg(bytes_to_str(opt)?.into(),
+                                            OsStr::from_bytes(&arg[1..]).into()))
                     }
-                    None => Arg::Long(bytes_to_str(bytes)?),
+                    None => Ok(Arg::Long(bytes_to_str(bytes)?)),
                 }
             },
-            short if short.starts_with(b"-") => arg_short(self)?,
-            _free => Arg::Free(self),
-        })
+            short if short.starts_with(b"-") => arg_short(self),
+            _free => Ok(Arg::Free(self)),
+        }
     }
 }
 
 #[cfg(windows)]
 impl OsStrArg for OsStr {
     fn arg(&self) -> Result<Arg, Error> {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
         let mut wide = self.encode_wide();
-        Ok(match wide.next() {
+        match wide.next() {
             // b'-' as u16 == 0x002D
             Some(0x002D) => match wide.next() {
                 Some(0x002D) => match wide.next() {
-                    // TODO Using encode_wide/decode_wide,
-                    // `--valid-utf8=invalid-utf8` can be turned into
-                    // `Arg::Long(Cow<str>, Cow<OsStr>)`; note the need to use
-                    // `Cow` which is not currently used here.
-                    Some(_) => arg_long(self.to_string_lossy())?,
-                    None => Arg::DoubleDash,
+                    Some(ch) => match self.to_string_lossy() {
+                        Cow::Owned(s) => {
+                            if s.contains('=') {
+                                // b'=' as u16 == 0x003D
+                                let opt = if ch == 0x003D {
+                                    "".into()
+                                } else {
+                                    let mut opt = vec![ch];
+                                    opt.extend(wide.by_ref().take_while(|&x| x != 0x003D));
+                                    OsString::from_wide(&opt)
+                                        .into_string()
+                                        .map_err(|s| Error::invalid_utf8(s.to_string_lossy().into()))?
+                                        .into()
+                                };
+                                let arg = OsString::from_wide(&wide.collect::<Vec<_>>());
+                                Ok(Arg::LongWithArg(opt, arg.into()))
+                            } else {
+                                Err(Error::invalid_utf8(s))
+                            }
+                        }
+                        Cow::Borrowed(s) => {
+                            match s.find('=') {
+                                Some(pos) => Ok(Arg::LongWithArg(
+                                    s[2..pos].into(), OsStr::new(&s[pos + 1..]).into())),
+                                None => Ok(Arg::Long(&s[2..])),
+                            }
+                        }
+                    }
+                    None => Ok(Arg::DoubleDash),
                 },
-                Some(_) => arg_short(self)?,
-                None => Arg::Free(self),
+                Some(_) => arg_short(self),
+                None => Ok(Arg::Free(self)),
             },
-            _ => Arg::Free(self),
-        })
+            _ => Ok(Arg::Free(self)),
+        }
     }
 }
 
 #[cfg(not(any(unix, windows)))]
 impl OsStrArg for OsStr {
+    /// For options like `--valid-utf8=invalid-utf8` `Error::InvalidUtf8` is
+    /// returned as `OsStr` cannot be split or truncated without a platform-specific
+    /// `OsStrExt`.
     fn arg(&self) -> Result<Arg, Error> {
         let lossy = self.to_string_lossy();
-        Ok(match lossy.as_ref() {
-            "-" => Arg::Free(self),
-            "--" => Arg::DoubleDash,
-            long if long.starts_with("--") => arg_long(lossy)?,
-            short if short.starts_with('-') => arg_short(self)?,
-            _free => Arg::Free(self),
-        })
+        match lossy.as_ref() {
+            "-" => Ok(Arg::Free(self)),
+            "--" => Ok(Arg::DoubleDash),
+            long if long.starts_with("--") => match lossy {
+                Cow::Owned(s) => Err(Error::invalid_utf8(s)),
+                Cow::Borrowed(s) => {
+                    match s.find('=') {
+                        Some(pos) => Ok(Arg::LongWithArg(
+                            s[2..pos].into(), OsStr::new(&s[pos + 1..]).into())),
+                        None => Ok(Arg::Long(&s[2..])),
+                    }
+                }
+            }
+            short if short.starts_with('-') => arg_short(self),
+            _free => Ok(Arg::Free(self)),
+        }
     }
 }
 
 /// Parse short argument.
 fn arg_short(s: &OsStr) -> Result<Arg, Error> {
     Ok(Arg::Short(to_str(s)?[1..].chars()))
-}
-
-/// Parse long argument.
-///
-/// For options like `--valid-utf8=invalid-utf8` `Error::InvalidUtf8` is
-/// returned as `OsStr` cannot be split or truncated without a platform-specific
-/// `OsStrExt`.
-#[cfg(not(unix))]
-fn arg_long(s: Cow<str>) -> Result<Arg, Error> {
-    match s {
-        Cow::Owned(s) => Err(Error::invalid_utf8(s)),
-        Cow::Borrowed(s) => {
-            match s.find('=') {
-                Some(pos) => Ok(Arg::LongWithArg(&s[2..pos], OsStr::new(&s[pos + 1..]))),
-                None => Ok(Arg::Long(&s[2..])),
-            }
-        }
-    }
 }
 
 /// Try to convert `&[u8]` (byte-representation of `&OsStr`) to `&str`.
@@ -859,6 +877,7 @@ pub fn parse_args_default_or_exit<T: Options>() -> T {
 mod test {
     use super::{Opt, Parser, ParsingStyle};
     use assert_matches::assert_matches;
+    use std::ffi::OsStr;
 
     #[test]
     fn test_parser() {
@@ -876,7 +895,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Ok(Opt::Short('x'))));
         assert_matches!(p.next_arg(), Some(foo) if foo == "foo");
         assert_matches!(p.next_opt(), Some(Ok(Opt::Long("long"))));
-        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("opt", val))) if val == "val");
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(opt, val))) if opt == "opt" && val == OsStr::new("val"));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(y))) if y == "y");
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(z))) if z == "-z");
         assert_matches!(p.next_opt(), None);
@@ -906,7 +925,8 @@ mod test {
     #[cfg(unix)]
     #[test]
     fn test_os_str() {
-        use super::{Error, ErrorKind, OsStr, OsStrExt};
+        use super::{Error, ErrorKind};
+        use std::os::unix::ffi::OsStrExt;
 
         let invalid = [b'-', b'-', b'f', b'o', 0x80, b'o'];
         let invalid_long = OsStr::from_bytes(&invalid[..]);
@@ -923,7 +943,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
-        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("f", arg))) if arg == valid_arg);
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(f, arg))) if f == "f" && arg == valid_arg);
         assert_matches!(p.next_opt(), None);
     }
 
@@ -940,7 +960,7 @@ mod test {
         let valid_free = OsString::from_wide(&invalid[2..]);
         let invalid = [0x002D, 0x002D, 0x0066, 0x003D, 0x006F, 0xD800, 0x006F];
         let valid_long = OsString::from_wide(&invalid[..]);
-        // let valid_arg = OsString::from_wide(&invalid[4..]);
+        let valid_arg = OsString::from_wide(&invalid[4..]);
 
         let args = &[&invalid_long, &invalid_short, &valid_free, &valid_long];
 
@@ -949,9 +969,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
-        assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
-        // That last one should ideally be the following:
-        // assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg("f", arg))) if arg == valid_arg);
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(f, arg))) if f == "f" && arg == valid_arg);
         assert_matches!(p.next_opt(), None);
     }
 }

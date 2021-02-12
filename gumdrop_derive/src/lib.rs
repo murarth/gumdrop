@@ -482,16 +482,16 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
         if let Some(long) = &opt.long {
             let (pat, handle) = if let Some(n) = opt.action.tuple_len() {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _) if _long == #long },
                     quote!{ return ::std::result::Result::Err(
-                        ::gumdrop::Error::unexpected_single_argument(_opt, #n)) })
+                        ::gumdrop::Error::unexpected_single_argument(&_opt, #n)) })
             } else if opt.action.takes_arg() {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _arg) },
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, ref _arg) if _long == #long },
                     opt.make_action_arg())
             } else {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _) if _long == #long },
                     quote!{ return ::std::result::Result::Err(
-                        ::gumdrop::Error::unexpected_argument(_opt)) })
+                        ::gumdrop::Error::unexpected_argument(&_opt)) })
             };
 
             pattern.push(pat);
@@ -682,14 +682,14 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
                 while let ::std::option::Option::Some(_opt) = _parser.next_opt() {
                     let _opt = _opt?;
-                    match _opt {
+                    match &_opt {
                         #( #pattern => { #handle_opt } )*
                         ::gumdrop::Opt::Free(_free) => {
                             #handle_free
                         }
                         _ => {
                             return ::std::result::Result::Err(
-                                ::gumdrop::Error::unrecognized_option(_opt));
+                                ::gumdrop::Error::unrecognized_option(&_opt));
                         }
                     }
                 }
@@ -1572,7 +1572,7 @@ impl ParseMethod {
         match self.tuple_len {
             None => quote!{ {
                 let _arg = _parser.next_arg()
-                    .ok_or_else(|| ::gumdrop::Error::missing_argument(_opt))?;
+                    .ok_or_else(|| ::gumdrop::Error::missing_argument(&_opt))?;
 
                 #parse
             } },
@@ -1586,7 +1586,7 @@ impl ParseMethod {
                         let _found = #num;
                         let _arg = _parser.next_arg()
                             .ok_or_else(|| ::gumdrop::Error::insufficient_arguments(
-                                _opt, #n, _found))?;
+                                &_opt, #n, _found))?;
 
                         #parse
                     } , )* )
