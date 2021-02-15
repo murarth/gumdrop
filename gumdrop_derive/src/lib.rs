@@ -55,8 +55,13 @@
 //!     * `parse(from_str = "...")` for `fn(&str) -> T`
 //!     * `parse(try_from_str = "...")` for
 //!       `fn(&str) -> Result<T, E> where E: Display`
-//!     * `parse(from_str)` uses `std::convert::From::from`
-//!     * `parse(try_from_str)` uses `std::str::FromStr::from_str`
+//!     * `parse(from_str)` uses `std::convert::From::<&str>::from`
+//!     * `parse(try_from_str)` uses `std::str::FromStr::from_str` (this is the
+//!       default when no parsing function is specified)
+//!     * `parse(from_os_str = "...")` for `fn(&OsStr) -> T`
+//!     * `parse(try_from_os_str = "...")` for
+//!       `fn(&OsStr) -> Result<T, E> where E: Display`
+//!     * `parse(from_os_str)` uses `std::convert::From::<&OsStr>::from`
 //!
 //! The `options` attribute may also be added at the type level.
 //!
@@ -841,6 +846,8 @@ enum ParseFn {
     Default,
     FromStr(Option<Path>),
     TryFromStr(Path),
+    FromOsStr(Option<Path>),
+    TryFromOsStr(Path),
 }
 
 struct ParseMethod {
@@ -1477,6 +1484,7 @@ impl ParseFn {
                     Some(ident) => match ident.to_string().as_str() {
                         "from_str" => ParseFn::FromStr(None),
                         "try_from_str" => ParseFn::Default,
+                        "from_os_str" => ParseFn::FromOsStr(None),
                         _ => return Err(unexpected_meta_item(ident.span()))
                     }
                     None => return Err(unexpected_meta_item(path.span()))
@@ -1492,6 +1500,14 @@ impl ParseFn {
                         "try_from_str" => {
                             let path = parse_str(&lit_str(&nv.lit)?)?;
                             ParseFn::TryFromStr(path)
+                        }
+                        "from_os_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::FromOsStr(Some(path))
+                        }
+                        "try_from_os_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::TryFromOsStr(path)
                         }
                         _ => return Err(unexpected_meta_item(nv.path.span()))
                     }
@@ -1529,6 +1545,17 @@ impl ParseFn {
                 #fun(::gumdrop::to_str(_arg)?)
                     .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
                         #name, ::std::string::ToString::to_string(&e)))?
+            },
+            ParseFn::FromOsStr(None) => quote!{
+                ::std::convert::From::from(_arg)
+            },
+            ParseFn::FromOsStr(Some(fun)) => quote!{
+                #fun(_arg)
+            },
+            ParseFn::TryFromOsStr(fun) => quote!{
+                #fun(_arg)
+                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                        #name, ::std::string::ToString::to_string(&e)))?
             }
         };
 
@@ -1551,6 +1578,18 @@ impl ParseFn {
             },
             ParseFn::TryFromStr(fun) => quote!{
                 #fun(#expr)
+                    .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                        stringify!(#ident), #expr,
+                        ::std::string::ToString::to_string(&e)))?
+            },
+            ParseFn::FromOsStr(None) => quote!{
+                ::std::convert::From::from(::std::ffi::OsStr::new(#expr))
+            },
+            ParseFn::FromOsStr(Some(fun)) => quote!{
+                #fun(::std::ffi::OsStr::new(#expr))
+            },
+            ParseFn::TryFromOsStr(fun) => quote!{
+                #fun(::std::ffi::OsStr::new(#expr))
                     .map_err(|e| ::gumdrop::Error::failed_parse_default(
                         stringify!(#ident), #expr,
                         ::std::string::ToString::to_string(&e)))?

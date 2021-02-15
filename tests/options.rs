@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::ffi::OsString;
 
 use assert_matches::assert_matches;
 
@@ -958,6 +959,9 @@ fn test_required_help() {
 
 #[test]
 fn test_parse() {
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
     #[derive(Options)]
     struct Opts {
         #[options(help = "foo", parse(from_str = "parse_foo"))]
@@ -968,6 +972,12 @@ fn test_parse() {
         baz: Option<Baz>,
         #[options(help = "quux", parse(try_from_str))]
         quux: Option<Quux>,
+        #[options(help = "foo-os", parse(from_os_str = "parse_foo_os"))]
+        foo_os: Option<FooOs>,
+        #[options(help = "bar-os", parse(try_from_os_str = "parse_bar_os"))]
+        bar_os: Option<BarOs>,
+        #[options(help = "baz-os", parse(from_os_str))]
+        baz_os: Option<BazOs>,
     }
 
     #[derive(Debug)]
@@ -978,9 +988,20 @@ fn test_parse() {
     struct Baz(String);
     #[derive(Debug)]
     struct Quux(u32);
+    #[derive(Debug)]
+    struct FooOs(OsString);
+    #[derive(Debug)]
+    struct BarOs(PathBuf);
+    #[derive(Debug)]
+    struct BazOs(OsString);
 
     fn parse_foo(s: &str) -> Foo { Foo(s.to_owned()) }
     fn parse_bar(s: &str) -> Result<Bar, <u32 as FromStr>::Err> { s.parse().map(Bar) }
+    fn parse_foo_os(s: &OsStr) -> FooOs { FooOs(s.to_owned()) }
+    fn parse_bar_os(s: &OsStr) -> Result<BarOs, &'static str> {
+        let path = Path::new(s);
+        path.extension().map(|_| BarOs(path.to_owned())).ok_or("extension required")
+    }
 
     impl<'a> From<&'a str> for Baz {
         fn from(s: &str) -> Baz {
@@ -996,17 +1017,30 @@ fn test_parse() {
         }
     }
 
+    impl<'a> From<&'a OsStr> for BazOs {
+        fn from(s: &OsStr) -> BazOs {
+            BazOs(s.to_owned())
+        }
+    }
+
     let opts = Opts::parse_args_default(&[
-        "-ffoo", "--bar=123", "--baz", "sup", "-q", "456"]).unwrap();
+        "-ffoo", "--bar=123", "--baz", "sup", "-q", "456",
+        "-Ffoo_os", "--bar-os=path.txt", "--baz-os", "supoz"
+    ]).unwrap();
     assert_matches!(opts.foo, Some(Foo(ref s)) if s == "foo");
     assert_matches!(opts.bar, Some(Bar(123)));
     assert_matches!(opts.baz, Some(Baz(ref s)) if s == "sup");
     assert_matches!(opts.quux, Some(Quux(456)));
+    assert_matches!(opts.foo_os, Some(FooOs(ref s)) if s == "foo_os");
+    assert_matches!(opts.bar_os, Some(BarOs(ref s)) if s.as_os_str() == "path.txt");
+    assert_matches!(opts.baz_os, Some(BazOs(ref s)) if s == "supoz");
 
     is_err!(Opts::parse_args_default(&["--bar", "xyz"]),
         |e| e.starts_with("invalid argument to option `--bar`: "));
     is_err!(Opts::parse_args_default(&["--quux", "xyz"]),
         |e| e.starts_with("invalid argument to option `--quux`: "));
+    is_err!(Opts::parse_args_default(&["--bar-os", "no_ext"]),
+        |e| e.starts_with("invalid argument to option `--bar-os`: "));
 }
 
 #[test]
@@ -1020,6 +1054,8 @@ fn test_default() {
         baz: Baz,
         #[options(count, default = "789")]
         count: u32,
+        #[options(default = "os", parse(from_os_str))]
+        foo_os: OsString,
     }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1038,12 +1074,14 @@ fn test_default() {
     assert_eq!(opts.bar, 123);
     assert_eq!(opts.baz, Baz(456));
     assert_eq!(opts.count, 789);
+    assert_eq!(opts.foo_os, "os");
 
-    let opts = Opts::parse_args_default(&["-b99", "--baz=4387", "-c", "-f1"]).unwrap();
+    let opts = Opts::parse_args_default(&["-b99", "--baz=4387", "-c", "-f1", "-Fq"]).unwrap();
     assert_eq!(opts.foo, 1);
     assert_eq!(opts.bar, 99);
     assert_eq!(opts.baz, Baz(4387));
     assert_eq!(opts.count, 790);
+    assert_eq!(opts.foo_os, "q");
 }
 
 #[test]
