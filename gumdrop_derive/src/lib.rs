@@ -486,8 +486,10 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                     quote!{ return ::std::result::Result::Err(
                         ::gumdrop::Error::unexpected_single_argument(&_opt, #n)) })
             } else if opt.action.takes_arg() {
-                (quote!{ ::gumdrop::Opt::LongWithArg(_long, ref _arg) if _long == #long },
-                    opt.make_action_arg())
+                let mut handle = quote!{ let _arg: &::std::ffi::OsStr = _arg; };
+                handle.extend(opt.make_action_arg());
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _arg) if _long == #long },
+                    handle)
             } else {
                 (quote!{ ::gumdrop::Opt::LongWithArg(_long, _) if _long == #long },
                     quote!{ return ::std::result::Result::Err(
