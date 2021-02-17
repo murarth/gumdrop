@@ -895,7 +895,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Ok(Opt::Short('x'))));
         assert_matches!(p.next_arg(), Some(foo) if foo == "foo");
         assert_matches!(p.next_opt(), Some(Ok(Opt::Long("long"))));
-        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(opt, val))) if opt == "opt" && val == OsStr::new("val"));
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(ref opt, ref val))) if opt == "opt" && val == OsStr::new("val"));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(y))) if y == "y");
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(z))) if z == "-z");
         assert_matches!(p.next_opt(), None);
@@ -943,7 +943,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
-        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(f, arg))) if f == "f" && arg == valid_arg);
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(ref f, ref arg))) if f == "f" && arg == valid_arg);
         assert_matches!(p.next_opt(), None);
     }
 
@@ -969,7 +969,7 @@ mod test {
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Err(Error{kind: ErrorKind::InvalidUtf8(_)})));
         assert_matches!(p.next_opt(), Some(Ok(Opt::Free(free))) if free == valid_free);
-        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(f, arg))) if f == "f" && arg == valid_arg);
+        assert_matches!(p.next_opt(), Some(Ok(Opt::LongWithArg(ref f, ref arg))) if f == "f" && arg == &valid_arg);
         assert_matches!(p.next_opt(), None);
     }
 }
