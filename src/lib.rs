@@ -693,12 +693,21 @@ impl Default for ParsingStyle {
     }
 }
 
-// TODO the OsStrExt of unix is also present for some non-unix platforms, those
-// should also use this implementation.
-#[cfg(unix)]
+#[cfg(any(unix, all(target_vendor = "fortanix", target_env = "sgx"),
+    target_os = "hermit", target_os = "redox", target_os = "vxworks", target_os = "wasi"))]
 impl OsStrArg for OsStr {
     fn arg(&self) -> Result<Arg, Error> {
+        /// Try to convert `&[u8]` (byte-representation of `&OsStr`) to `&str`.
+        fn bytes_to_str(s: &[u8]) -> Result<&str, Error> {
+            cow_to_str(String::from_utf8_lossy(s))
+        }
+
+        #[cfg(any(unix, target_os = "hermit", target_os = "redox", target_os = "vxworks"))]
         use std::os::unix::ffi::OsStrExt;
+        #[cfg(all(target_vendor = "fortanix", target_env = "sgx"))]
+        use std::os::fortanix_sgx::ffi::OsStrExt;
+        #[cfg(target_os = "wasi")]
+        use std::os::wasi::ffi::OsStrExt;
 
         let bytes = self.as_bytes();
         match bytes {
@@ -770,7 +779,8 @@ impl OsStrArg for OsStr {
     }
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(unix, windows, all(target_vendor = "fortanix", target_env = "sgx"),
+    target_os = "hermit", target_os = "redox", target_os = "vxworks", target_os = "wasi")))]
 impl OsStrArg for OsStr {
     /// For options like `--valid-utf8=invalid-utf8` `Error::InvalidUtf8` is
     /// returned as `OsStr` cannot be split or truncated without a platform-specific
@@ -799,12 +809,6 @@ impl OsStrArg for OsStr {
 /// Parse short argument.
 fn arg_short(s: &OsStr) -> Result<Arg, Error> {
     Ok(Arg::Short(to_str(s)?[1..].chars()))
-}
-
-/// Try to convert `&[u8]` (byte-representation of `&OsStr`) to `&str`.
-#[cfg(unix)]
-fn bytes_to_str(s: &[u8]) -> Result<&str, Error> {
-    cow_to_str(String::from_utf8_lossy(s))
 }
 
 /// Try to convert `&OsStr` to `&str`.
