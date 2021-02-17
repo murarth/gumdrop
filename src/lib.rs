@@ -140,6 +140,8 @@
 //!
 //! ```
 //! use gumdrop::Options;
+//! use std::path::PathBuf;
+//! use std::fs::{self, Metadata};
 //!
 //! #[derive(Debug, Options)]
 //! struct MyOptions {
@@ -149,6 +151,13 @@
 //!     // `from_str = "..."` supplies a conversion function that always succeeds
 //!     #[options(help = "a string that becomes uppercase", parse(from_str = "to_upper"))]
 //!     upper: String,
+//!     // `from_os_str` can be used if the argument may contain invalid UTF-8
+//!     #[options(help = "a path that may not be valid UTF-8", parse(from_os_str))]
+//!     path: PathBuf,
+//!     // `try_from_os_str = "..."` and `from_os_str = "..."` are akin to the named
+//!     // functions above but allow for arguments containing invalid UTF-8
+//!     #[options(help = "metadata of a file", parse(try_from_os_str = "fs::metadata"))]
+//!     bytes: Option<Metadata>,
 //! }
 //!
 //! fn parse_hex(s: &str) -> Result<u32, std::num::ParseIntError> {
