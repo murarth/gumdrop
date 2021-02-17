@@ -55,8 +55,13 @@
 //!     * `parse(from_str = "...")` for `fn(&str) -> T`
 //!     * `parse(try_from_str = "...")` for
 //!       `fn(&str) -> Result<T, E> where E: Display`
-//!     * `parse(from_str)` uses `std::convert::From::from`
-//!     * `parse(try_from_str)` uses `std::str::FromStr::from_str`
+//!     * `parse(from_str)` uses `std::convert::From::<&str>::from`
+//!     * `parse(try_from_str)` uses `std::str::FromStr::from_str` (this is the
+//!       default when no parsing function is specified)
+//!     * `parse(from_os_str = "...")` for `fn(&OsStr) -> T`
+//!     * `parse(try_from_os_str = "...")` for
+//!       `fn(&OsStr) -> Result<T, E> where E: Display`
+//!     * `parse(from_os_str)` uses `std::convert::From::<&OsStr>::from`
 //!
 //! The `options` attribute may also be added at the type level.
 //!
@@ -229,13 +234,13 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 let _arg = _parser.next_arg()
                     .ok_or_else(::gumdrop::Error::missing_command)?;
 
-                Self::parse_command(_arg, _parser)
+                Self::parse_command(::gumdrop::to_str(_arg)?, _parser)
             }
 
             fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
@@ -252,7 +257,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 }
             }
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 let cmd = match name {
@@ -482,16 +487,18 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
         if let Some(long) = &opt.long {
             let (pat, handle) = if let Some(n) = opt.action.tuple_len() {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _) if _long == #long },
                     quote!{ return ::std::result::Result::Err(
-                        ::gumdrop::Error::unexpected_single_argument(_opt, #n)) })
+                        ::gumdrop::Error::unexpected_single_argument(&_opt, #n)) })
             } else if opt.action.takes_arg() {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _arg) },
-                    opt.make_action_arg())
+                let mut handle = quote!{ let _arg: &::std::ffi::OsStr = _arg; };
+                handle.extend(opt.make_action_arg());
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _arg) if _long == #long },
+                    handle)
             } else {
-                (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
+                (quote!{ ::gumdrop::Opt::LongWithArg(_long, _) if _long == #long },
                     quote!{ return ::std::result::Result::Err(
-                        ::gumdrop::Error::unexpected_argument(_opt)) })
+                        ::gumdrop::Error::unexpected_argument(&_opt)) })
             };
 
             pattern.push(pat);
@@ -577,7 +584,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         quote!{
             #mark_used
             _result.#ident = ::std::option::Option::Some(
-                ::gumdrop::Options::parse_command(_free, _parser)?);
+                ::gumdrop::Options::parse_command(::gumdrop::to_str(_free)?, _parser)?);
             break;
         }
     } else {
@@ -666,7 +673,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 #[derive(Default)]
@@ -681,14 +688,15 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 let mut _used = _Used::default();
 
                 while let ::std::option::Option::Some(_opt) = _parser.next_opt() {
-                    match _opt {
+                    let _opt = _opt?;
+                    match &_opt {
                         #( #pattern => { #handle_opt } )*
                         ::gumdrop::Opt::Free(_free) => {
                             #handle_free
                         }
                         _ => {
                             return ::std::result::Result::Err(
-                                ::gumdrop::Error::unrecognized_option(_opt));
+                                ::gumdrop::Error::unrecognized_option(&_opt));
                         }
                     }
                 }
@@ -712,7 +720,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
             #help_requested_impl
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::std::convert::AsRef<::std::ffi::OsStr>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 ::std::result::Result::Err(
@@ -838,6 +846,8 @@ enum ParseFn {
     Default,
     FromStr(Option<Path>),
     TryFromStr(Path),
+    FromOsStr(Option<Path>),
+    TryFromOsStr(Path),
 }
 
 struct ParseMethod {
@@ -1474,6 +1484,7 @@ impl ParseFn {
                     Some(ident) => match ident.to_string().as_str() {
                         "from_str" => ParseFn::FromStr(None),
                         "try_from_str" => ParseFn::Default,
+                        "from_os_str" => ParseFn::FromOsStr(None),
                         _ => return Err(unexpected_meta_item(ident.span()))
                     }
                     None => return Err(unexpected_meta_item(path.span()))
@@ -1489,6 +1500,14 @@ impl ParseFn {
                         "try_from_str" => {
                             let path = parse_str(&lit_str(&nv.lit)?)?;
                             ParseFn::TryFromStr(path)
+                        }
+                        "from_os_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::FromOsStr(Some(path))
+                        }
+                        "try_from_os_str" => {
+                            let path = parse_str(&lit_str(&nv.lit)?)?;
+                            ParseFn::TryFromOsStr(path)
                         }
                         _ => return Err(unexpected_meta_item(nv.path.span()))
                     }
@@ -1512,17 +1531,28 @@ impl ParseFn {
 
         let res = match self {
             ParseFn::Default => quote!{
-                ::std::str::FromStr::from_str(_arg)
+                ::std::str::FromStr::from_str(::gumdrop::to_str(_arg)?)
                     .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
                         #name, ::std::string::ToString::to_string(&e)))?
             },
             ParseFn::FromStr(None) => quote!{
-                ::std::convert::From::from(_arg)
+                ::std::convert::From::from(::gumdrop::to_str(_arg)?)
             },
             ParseFn::FromStr(Some(fun)) => quote!{
-                #fun(_arg)
+                #fun(::gumdrop::to_str(_arg)?)
             },
             ParseFn::TryFromStr(fun) => quote!{
+                #fun(::gumdrop::to_str(_arg)?)
+                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                        #name, ::std::string::ToString::to_string(&e)))?
+            },
+            ParseFn::FromOsStr(None) => quote!{
+                ::std::convert::From::from(_arg)
+            },
+            ParseFn::FromOsStr(Some(fun)) => quote!{
+                #fun(_arg)
+            },
+            ParseFn::TryFromOsStr(fun) => quote!{
                 #fun(_arg)
                     .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
                         #name, ::std::string::ToString::to_string(&e)))?
@@ -1551,6 +1581,18 @@ impl ParseFn {
                     .map_err(|e| ::gumdrop::Error::failed_parse_default(
                         stringify!(#ident), #expr,
                         ::std::string::ToString::to_string(&e)))?
+            },
+            ParseFn::FromOsStr(None) => quote!{
+                ::std::convert::From::from(::std::ffi::OsStr::new(#expr))
+            },
+            ParseFn::FromOsStr(Some(fun)) => quote!{
+                #fun(::std::ffi::OsStr::new(#expr))
+            },
+            ParseFn::TryFromOsStr(fun) => quote!{
+                #fun(::std::ffi::OsStr::new(#expr))
+                    .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                        stringify!(#ident), #expr,
+                        ::std::string::ToString::to_string(&e)))?
             }
         };
 
@@ -1571,7 +1613,7 @@ impl ParseMethod {
         match self.tuple_len {
             None => quote!{ {
                 let _arg = _parser.next_arg()
-                    .ok_or_else(|| ::gumdrop::Error::missing_argument(_opt))?;
+                    .ok_or_else(|| ::gumdrop::Error::missing_argument(&_opt))?;
 
                 #parse
             } },
@@ -1585,7 +1627,7 @@ impl ParseMethod {
                         let _found = #num;
                         let _arg = _parser.next_arg()
                             .ok_or_else(|| ::gumdrop::Error::insufficient_arguments(
-                                _opt, #n, _found))?;
+                                &_opt, #n, _found))?;
 
                         #parse
                     } , )* )
