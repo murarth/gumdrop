@@ -273,7 +273,7 @@ pub trait Options {
     /// process will exit with status code `2`.
     ///
     /// If the user supplies a help option, option usage will be printed to
-    /// `stdout` and the process will exit with status code `0`.
+    /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
     fn parse_args_or_exit(style: ParsingStyle) -> Self where Self: Sized {
@@ -304,14 +304,14 @@ pub trait Options {
                 }
             }
 
-            println!("Usage: {}{} [OPTIONS]", args[0], command_str);
-            println!();
-            println!("{}", command.self_usage());
+            eprintln!("Usage: {}{} [OPTIONS]", args[0], command_str);
+            eprintln!();
+            eprintln!("{}", command.self_usage());
 
             if let Some(cmds) = command.self_command_list() {
-                println!();
-                println!("Available commands:");
-                println!("{}", cmds);
+                eprintln!();
+                eprintln!("Available commands:");
+                eprintln!("{}", cmds);
             }
 
             exit(0);
@@ -327,7 +327,7 @@ pub trait Options {
     /// process will exit with status code `2`.
     ///
     /// If the user supplies a help option, option usage will be printed to
-    /// `stdout` and the process will exit with status code `0`.
+    /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
     fn parse_args_default_or_exit() -> Self where Self: Sized {
@@ -695,7 +695,7 @@ pub fn parse_args_default<T: Options>(args: &[String]) -> Result<T, Error> {
 /// process will exit with status code `2`.
 ///
 /// If the user supplies a help option, option usage will be printed to
-/// `stdout` and the process will exit with status code `0`.
+/// `stderr` and the process will exit with status code `0`.
 ///
 /// Otherwise, the parsed options are returned.
 ///
@@ -713,7 +713,7 @@ pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
 /// process will exit with status code `2`.
 ///
 /// If the user supplies a help option, option usage will be printed to
-/// `stdout` and the process will exit with status code `0`.
+/// `stderr` and the process will exit with status code `0`.
 ///
 /// Otherwise, the parsed options are returned.
 ///
