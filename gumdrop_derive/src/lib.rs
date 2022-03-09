@@ -13,7 +13,7 @@
 //! Behavior of `derive(Options)` can be controlled by adding `#[options(...)]`
 //! attributes to one or more fields within a decorated struct.
 //!
-//! Supported items are:
+//! Supported items for `struct` fields are:
 //!
 //! * `command` indicates that a field represents a subcommand. The field must
 //!   be of type `Option<T>` where `T` is a type implementing `Options`.
@@ -58,15 +58,21 @@
 //!     * `parse(from_str)` uses `std::convert::From::from`
 //!     * `parse(try_from_str)` uses `std::str::FromStr::from_str`
 //!
-//! The `options` attribute may also be added at the type level.
+//! Additionally, the following flags may be set at the type level to establish
+//! default values for all contained fields: `no_help_flag`, `no_long`,
+//! `no_short`, and `required`.
+//!
+//! Supported items for `enum` variants are:
+//!
+//! * `name = "..."` sets the user-facing command name.  
+//!   If this option is not present, one is automatically generated from the variant name.
+//! * `help = "..."` sets the help string for the command;
+//!   variant doc comment may also be provided to set the help text.
+//!   If both are present, the `help` attribute value is used.
 //!
 //! The `help` attribute (or a type-level doc comment) can be used to provide
 //! some introductory text which will precede option help text in the usage
 //! string.
-//!
-//! Additionally, the following flags may be set at the type level to establish
-//! default values for all contained fields: `no_help_flag`, `no_long`,
-//! `no_short`, and `required`.
 
 #![recursion_limit = "1024"]
 
