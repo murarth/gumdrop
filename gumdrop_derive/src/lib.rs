@@ -1817,11 +1817,25 @@ fn make_usage(help: &Option<String>, free: &[FreeOpt], opts: &[Opt]) -> String {
             res.push('\n');
         }
 
-        res.push_str("Optional arguments:\n");
+        let (required,optional): (Vec<&Opt>,Vec<&Opt>) =
+            opts.iter().partition(|o| o.required);
 
-        for opt in opts {
-            res.push_str(&opt.usage(width));
-            res.push('\n');
+        if !required.is_empty() {
+            res.push_str("Required arguments:\n");
+
+            for opt in required {
+                res.push_str(&opt.usage(width));
+                res.push('\n');    
+            }
+        }
+        
+        if !optional.is_empty() {
+            res.push_str("Optional arguments:\n");
+
+            for opt in optional {
+                res.push_str(&opt.usage(width));
+                res.push('\n');    
+            }
         }
     }
 
