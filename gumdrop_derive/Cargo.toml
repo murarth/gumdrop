@@ -18,7 +18,7 @@ name = "gumdrop_derive"
 proc-macro = true
 
 [features]
-default = ["std"]
+default = []
 default_expr = ["syn/full"]
 std = []
 
