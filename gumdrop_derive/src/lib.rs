@@ -74,6 +74,7 @@
 //! some introductory text which will precede option help text in the usage
 //! string.
 
+#![feature(stmt_expr_attributes)]
 #![recursion_limit = "1024"]
 
 extern crate proc_macro;
@@ -94,6 +95,8 @@ use syn::{
 
 #[cfg(feature = "default_expr")]
 use syn::Expr;
+
+use cfg_if::cfg_if;
 
 /// Derives the `gumdrop::Options` trait for `struct` and `enum` items.
 ///
@@ -1511,16 +1514,35 @@ impl ParseFn {
 
     fn make_parse_action(&self, name: Option<&str>) -> TokenStream2 {
         let name = if let Some(name) = name {
-            quote!{ ::std::string::ToString::to_string(#name) }
+            cfg_if! {
+                if #[cfg(feature = "std")] {
+                    quote!{ ::std::string::ToString::to_string(#name) }
+                } else {
+                    quote!{ ::alloc::string::ToString::to_string(#name) }
+                }
+            }
         } else {
             quote!{ ::gumdrop::Opt::to_string(&_opt) }
         };
+        
 
         let res = match self {
-            ParseFn::Default => quote!{
-                ::std::str::FromStr::from_str(_arg)
-                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
-                        #name, ::std::string::ToString::to_string(&e)))?
+            ParseFn::Default => {
+                cfg_if! {
+                    if #[cfg(feature = "std")] {
+                        quote!{
+                            ::std::str::FromStr::from_str(_arg)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                                    #name, ::std::string::ToString::to_string(&e)))?
+                        }
+                    } else {
+                        quote!{
+                            ::alloc::str::FromStr::from_str(_arg)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                                    #name, ::alloc::string::ToString::to_string(&e)))?
+                        }
+                    }
+                }
             },
             ParseFn::FromStr(None) => quote!{
                 ::core::convert::From::from(_arg)
@@ -1528,10 +1550,20 @@ impl ParseFn {
             ParseFn::FromStr(Some(fun)) => quote!{
                 #fun(_arg)
             },
-            ParseFn::TryFromStr(fun) => quote!{
-                #fun(_arg)
-                    .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
-                        #name, ::std::string::ToString::to_string(&e)))?
+            ParseFn::TryFromStr(fun) => {
+                cfg_if! { 
+                    if #[cfg(feature = "std")] {
+                        quote!{
+                            #fun(_arg)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                                    #name, ::std::string::ToString::to_string(&e)))?
+                        }
+                    } else {
+                        #fun(_arg)
+                            .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                                #name, ::alloc::string::ToString::to_string(&e)))?
+                    }
+                }
             }
         };
 
@@ -1540,11 +1572,24 @@ impl ParseFn {
 
     fn make_parse_default_action(&self, ident: &Ident, expr: &str) -> TokenStream2 {
         let res = match self {
-            ParseFn::Default => quote!{
-                ::std::str::FromStr::from_str(#expr)
-                    .map_err(|e| ::gumdrop::Error::failed_parse_default(
-                        stringify!(#ident), #expr,
-                        ::std::string::ToString::to_string(&e)))?
+            ParseFn::Default => {
+                cfg_if! {
+                    if #[cfg(feature = "std")] {
+                        quote!{
+                            ::std::str::FromStr::from_str(#expr)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                                    stringify!(#ident), #expr,
+                                    ::std::string::ToString::to_string(&e)))?
+                        }
+                    } else {
+                        quote!{
+                            ::alloc::str::FromStr::from_str(#expr)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                                    stringify!(#ident), #expr,
+                                    ::alloc::string::ToString::to_string(&e)))?
+                        }
+                    }
+                }
             },
             ParseFn::FromStr(None) => quote!{
                 ::core::convert::From::from(#expr)
@@ -1552,11 +1597,24 @@ impl ParseFn {
             ParseFn::FromStr(Some(fun)) => quote!{
                 #fun(#expr)
             },
-            ParseFn::TryFromStr(fun) => quote!{
-                #fun(#expr)
-                    .map_err(|e| ::gumdrop::Error::failed_parse_default(
-                        stringify!(#ident), #expr,
-                        ::std::string::ToString::to_string(&e)))?
+            ParseFn::TryFromStr(fun) => {
+                cfg_if! {
+                    if #[cfg(feature = "std")] {
+                        quote!{
+                            #fun(#expr)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                                    stringify!(#ident), #expr,
+                                    ::std::string::ToString::to_string(&e)))?
+                        }
+                    } else {
+                        quote!{
+                            #fun(#expr)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_default(
+                                    stringify!(#ident), #expr,
+                                    ::alloc::string::ToString::to_string(&e)))?
+                        }
+                    }
+                }
             }
         };
 
