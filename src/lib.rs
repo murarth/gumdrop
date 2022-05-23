@@ -179,7 +179,9 @@ use std::error::Error as StdError;
 use core::fmt;
 use core::slice::Iter;
 use core::str::Chars;
-use alloc::string::String;
+
+#[cfg(not(feature="std"))]
+use alloc::{string::String, format, borrow::ToOwned};
 
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
