@@ -208,7 +208,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
 
         quote!{
             match self {
-                #( #name::#variant(_) => ::std::option::Option::Some(#command), )*
+                #( #name::#variant(_) => ::core::option::Option::Some(#command), )*
             }
         }
     };
@@ -235,20 +235,20 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::core::convert::AsRef<str>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
-                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                    -> ::core::result::Result<Self, ::gumdrop::Error> {
                 let _arg = _parser.next_arg()
                     .ok_or_else(::gumdrop::Error::missing_command)?;
 
                 Self::parse_command(_arg, _parser)
             }
 
-            fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
+            fn command(&self) -> ::core::option::Option<&dyn ::gumdrop::Options> {
                 #command_impl
             }
 
-            fn command_name(&self) -> ::std::option::Option<&'static str> {
+            fn command_name(&self) -> ::core::option::Option<&'static str> {
                 #command_name_impl
             }
 
@@ -258,16 +258,16 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 }
             }
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::core::convert::AsRef<str>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
-                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                    -> ::core::result::Result<Self, ::gumdrop::Error> {
                 let cmd = match name {
                     #( #command => { #handle_cmd } )*
-                    _ => return ::std::result::Result::Err(
+                    _ => return ::core::result::Result::Err(
                         ::gumdrop::Error::unrecognized_command(name))
                 };
 
-                ::std::result::Result::Ok(cmd)
+                ::core::result::Result::Ok(cmd)
             }
 
             fn usage() -> &'static str {
@@ -278,19 +278,19 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 #self_usage_impl
             }
 
-            fn command_list() -> ::std::option::Option<&'static str> {
-                ::std::option::Option::Some(<Self as ::gumdrop::Options>::usage())
+            fn command_list() -> ::core::option::Option<&'static str> {
+                ::core::option::Option::Some(<Self as ::gumdrop::Options>::usage())
             }
 
-            fn self_command_list(&self) -> ::std::option::Option<&'static str> {
+            fn self_command_list(&self) -> ::core::option::Option<&'static str> {
                 #self_command_list_impl
             }
 
-            fn command_usage(name: &str) -> ::std::option::Option<&'static str> {
+            fn command_usage(name: &str) -> ::core::option::Option<&'static str> {
                 match name {
-                    #( #command => ::std::option::Option::Some(
+                    #( #command => ::core::option::Option::Some(
                         <#var_ty as ::gumdrop::Options>::usage()), )*
-                    _ => ::std::option::Option::None
+                    _ => ::core::option::Option::None
                 }
             }
         }
@@ -314,7 +314,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let mut field_name = Vec::new();
     let mut default = Vec::new();
 
-    let default_expr = quote!{ ::std::default::Default::default() };
+    let default_expr = quote!{ ::core::default::Default::default() };
     let default_opts = DefaultOpts::parse(&ast.attrs)?;
 
     for field in fields {
@@ -489,14 +489,14 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         if let Some(long) = &opt.long {
             let (pat, handle) = if let Some(n) = opt.action.tuple_len() {
                 (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
-                    quote!{ return ::std::result::Result::Err(
+                    quote!{ return ::core::result::Result::Err(
                         ::gumdrop::Error::unexpected_single_argument(_opt, #n)) })
             } else if opt.action.takes_arg() {
                 (quote!{ ::gumdrop::Opt::LongWithArg(#long, _arg) },
                     opt.make_action_arg())
             } else {
                 (quote!{ ::gumdrop::Opt::LongWithArg(#long, _) },
-                    quote!{ return ::std::result::Result::Err(
+                    quote!{ return ::core::result::Result::Err(
                         ::gumdrop::Error::unexpected_argument(_opt)) })
             };
 
@@ -530,7 +530,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             }
         } else {
             quote!{
-                return ::std::result::Result::Err(
+                return ::core::result::Result::Err(
                     ::gumdrop::Error::unexpected_free(_free))
             }
         };
@@ -554,7 +554,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 },
                 FreeAction::SetOption => quote!{
                     let _arg = _free;
-                    _result.#field = ::std::option::Option::Some(#parse);
+                    _result.#field = ::core::option::Option::Some(#parse);
                 },
             };
 
@@ -582,42 +582,42 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
         quote!{
             #mark_used
-            _result.#ident = ::std::option::Option::Some(
+            _result.#ident = ::core::option::Option::Some(
                 ::gumdrop::Options::parse_command(_free, _parser)?);
             break;
         }
     } else {
         quote!{
-            return ::std::result::Result::Err(
+            return ::core::result::Result::Err(
                 ::gumdrop::Error::unexpected_free(_free));
         }
     };
 
     let command_impl = match &command {
-        None => quote!{ ::std::option::Option::None },
+        None => quote!{ ::core::option::Option::None },
         Some(field) => quote!{
-            ::std::option::Option::map(
-                ::std::option::Option::as_ref(&self.#field),
+            ::core::option::Option::map(
+                ::core::option::Option::as_ref(&self.#field),
                 |sub| sub as _)
         }
     };
 
     let command_name_impl = match &command {
-        None => quote!{ ::std::option::Option::None },
+        None => quote!{ ::core::option::Option::None },
         Some(field) => quote!{
-            ::std::option::Option::and_then(
-                ::std::option::Option::as_ref(&self.#field),
+            ::core::option::Option::and_then(
+                ::core::option::Option::as_ref(&self.#field),
                 ::gumdrop::Options::command_name)
         }
     };
 
     let command_list = match command_ty {
         Some(ty) => quote!{
-            ::std::option::Option::Some(
+            ::core::option::Option::Some(
                 <#ty as ::gumdrop::Options>::usage())
         },
         None => quote!{
-            ::std::option::Option::None
+            ::core::option::Option::None
         }
     };
 
@@ -626,7 +626,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             <#ty as ::gumdrop::Options>::command_usage(_name)
         },
         None => quote!{
-            ::std::option::Option::None
+            ::core::option::Option::None
         }
     };
 
@@ -639,8 +639,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         (flags, Some(cmd)) => quote!{
             fn help_requested(&self) -> bool {
                 #( self.#flags || )*
-                ::std::option::Option::map_or(
-                    ::std::option::Option::as_ref(&self.#cmd),
+                ::core::option::Option::map_or(
+                    ::core::option::Option::as_ref(&self.#cmd),
                     false, ::gumdrop::Options::help_requested)
             }
         }
@@ -649,8 +649,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let self_usage_impl = match &command {
         None => quote!{ <Self as ::gumdrop::Options>::usage() },
         Some(field) => quote!{
-            ::std::option::Option::map_or_else(
-                ::std::option::Option::as_ref(&self.#field),
+            ::core::option::Option::map_or_else(
+                ::core::option::Option::as_ref(&self.#field),
                 <Self as ::gumdrop::Options>::usage,
                 ::gumdrop::Options::self_usage)
         }
@@ -659,8 +659,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let self_command_list_impl = match &command {
         None => quote!{ <Self as ::gumdrop::Options>::command_list() },
         Some(field) => quote!{
-            ::std::option::Option::map_or_else(
-                ::std::option::Option::as_ref(&self.#field),
+            ::core::option::Option::map_or_else(
+                ::core::option::Option::as_ref(&self.#field),
                 <Self as ::gumdrop::Options>::command_list,
                 ::gumdrop::Options::self_command_list)
         }
@@ -672,9 +672,9 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
     Ok(quote!{
         impl #impl_generics ::gumdrop::Options for #name #ty_generics #where_clause {
-            fn parse<__S: ::std::convert::AsRef<str>>(
+            fn parse<__S: ::core::convert::AsRef<str>>(
                     _parser: &mut ::gumdrop::Parser<__S>)
-                    -> ::std::result::Result<Self, ::gumdrop::Error> {
+                    -> ::core::result::Result<Self, ::gumdrop::Error> {
                 #[derive(Default)]
                 struct _Used {
                     #( #required: bool , )*
@@ -686,14 +686,14 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 let mut _free_counter = 0usize;
                 let mut _used = _Used::default();
 
-                while let ::std::option::Option::Some(_opt) = _parser.next_opt() {
+                while let ::core::option::Option::Some(_opt) = _parser.next_opt() {
                     match _opt {
                         #( #pattern => { #handle_opt } )*
                         ::gumdrop::Opt::Free(_free) => {
                             #handle_free
                         }
                         _ => {
-                            return ::std::result::Result::Err(
+                            return ::core::result::Result::Err(
                                 ::gumdrop::Error::unrecognized_option(_opt));
                         }
                     }
@@ -701,27 +701,27 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
                 if true #( && !_result.#help_flag )* {
                     #( if !_used.#required {
-                        return ::std::result::Result::Err(#required_err);
+                        return ::core::result::Result::Err(#required_err);
                     } )*
                 }
 
-                ::std::result::Result::Ok(_result)
+                ::core::result::Result::Ok(_result)
             }
 
-            fn command(&self) -> ::std::option::Option<&dyn ::gumdrop::Options> {
+            fn command(&self) -> ::core::option::Option<&dyn ::gumdrop::Options> {
                 #command_impl
             }
 
-            fn command_name(&self) -> ::std::option::Option<&'static str> {
+            fn command_name(&self) -> ::core::option::Option<&'static str> {
                 #command_name_impl
             }
 
             #help_requested_impl
 
-            fn parse_command<__S: ::std::convert::AsRef<str>>(name: &str,
+            fn parse_command<__S: ::core::convert::AsRef<str>>(name: &str,
                     _parser: &mut ::gumdrop::Parser<__S>)
-                    -> ::std::result::Result<Self, ::gumdrop::Error> {
-                ::std::result::Result::Err(
+                    -> ::core::result::Result<Self, ::gumdrop::Error> {
+                ::core::result::Result::Err(
                     ::gumdrop::Error::unrecognized_command(name))
             }
 
@@ -733,15 +733,15 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 #self_usage_impl
             }
 
-            fn command_list() -> ::std::option::Option<&'static str> {
+            fn command_list() -> ::core::option::Option<&'static str> {
                 #command_list
             }
 
-            fn command_usage(_name: &str) -> ::std::option::Option<&'static str> {
+            fn command_usage(_name: &str) -> ::core::option::Option<&'static str> {
                 #command_usage
             }
 
-            fn self_command_list(&self) -> ::std::option::Option<&'static str> {
+            fn self_command_list(&self) -> ::core::option::Option<&'static str> {
                 #self_command_list_impl
             }
         }
@@ -1375,7 +1375,7 @@ impl<'a> Opt<'a> {
                 let act = parse.make_action_type();
 
                 quote!{
-                    _result.#field = ::std::option::Option::Some(#act);
+                    _result.#field = ::core::option::Option::Some(#act);
                 }
             }
             Switch => quote!{
@@ -1414,7 +1414,7 @@ impl<'a> Opt<'a> {
                 let act = parse.make_action_type_arg();
 
                 quote!{
-                    _result.#field = ::std::option::Option::Some(#act);
+                    _result.#field = ::core::option::Option::Some(#act);
                 }
             }
             _ => unreachable!()
@@ -1523,7 +1523,7 @@ impl ParseFn {
                         #name, ::std::string::ToString::to_string(&e)))?
             },
             ParseFn::FromStr(None) => quote!{
-                ::std::convert::From::from(_arg)
+                ::core::convert::From::from(_arg)
             },
             ParseFn::FromStr(Some(fun)) => quote!{
                 #fun(_arg)
@@ -1547,7 +1547,7 @@ impl ParseFn {
                         ::std::string::ToString::to_string(&e)))?
             },
             ParseFn::FromStr(None) => quote!{
-                ::std::convert::From::from(#expr)
+                ::core::convert::From::from(#expr)
             },
             ParseFn::FromStr(Some(fun)) => quote!{
                 #fun(#expr)
