@@ -169,6 +169,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
+#[cfg_attr(feature = "std", macro_use)]
+extern crate alloc;
+
 pub use gumdrop_derive::*;
 
 #[cfg(feature="std")]
@@ -176,6 +179,7 @@ use std::error::Error as StdError;
 use core::fmt;
 use core::slice::Iter;
 use core::str::Chars;
+use alloc::string::String;
 
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
