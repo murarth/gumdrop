@@ -166,14 +166,16 @@
 //! }
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
 pub use gumdrop_derive::*;
 
+#[cfg(feature="std")]
 use std::error::Error as StdError;
-use std::fmt;
-use std::slice::Iter;
-use std::str::Chars;
+use core::fmt;
+use core::slice::Iter;
+use core::str::Chars;
 
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
@@ -276,6 +278,7 @@ pub trait Options {
     /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
+    #[cfg(feature="std")]
     fn parse_args_or_exit(style: ParsingStyle) -> Self where Self: Sized {
         use std::env::args;
         use std::process::exit;
@@ -330,6 +333,7 @@ pub trait Options {
     /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
+    #[cfg(feature="std")]
     fn parse_args_default_or_exit() -> Self where Self: Sized {
         Self::parse_args_or_exit(ParsingStyle::default())
     }
@@ -561,6 +565,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature="std")]
 impl StdError for Error {
     fn description(&self) -> &str {
         "failed to parse arguments"
@@ -702,6 +707,7 @@ pub fn parse_args_default<T: Options>(args: &[String]) -> Result<T, Error> {
 /// # Panics
 ///
 /// If any argument to the process is not valid unicode.
+#[cfg(feature="std")]
 pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
     T::parse_args_or_exit(style)
 }
@@ -720,6 +726,7 @@ pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
 /// # Panics
 ///
 /// If any argument to the process is not valid unicode.
+#[cfg(feature="std")]
 pub fn parse_args_default_or_exit<T: Options>() -> T {
     T::parse_args_default_or_exit()
 }

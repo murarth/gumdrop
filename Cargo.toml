@@ -15,8 +15,9 @@ license = "MIT/Apache-2.0"
 readme = "README.md"
 
 [features]
-default = []
+default = ["std"]
 default_expr = ["gumdrop_derive/default_expr"]
+std = []
 
 [dependencies]
 gumdrop_derive = { version = "0.8.1", path = "gumdrop_derive" }

@@ -78,7 +78,7 @@
 
 extern crate proc_macro;
 
-use std::iter::repeat;
+use core::iter::repeat;
 
 use quote::quote;
 
