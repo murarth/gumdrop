@@ -1559,9 +1559,11 @@ impl ParseFn {
                                     #name, ::std::string::ToString::to_string(&e)))?
                         }
                     } else {
-                        #fun(_arg)
-                            .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
-                                #name, ::alloc::string::ToString::to_string(&e)))?
+                        quote!{
+                            #fun(_arg)
+                                .map_err(|e| ::gumdrop::Error::failed_parse_with_name(
+                                    #name, ::alloc::string::ToString::to_string(&e)))?
+                        }
                     }
                 }
             }
