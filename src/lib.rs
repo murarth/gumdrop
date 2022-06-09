@@ -198,7 +198,7 @@ enum ErrorKind {
     MissingCommand,
     MissingRequired(String),
     MissingRequiredCommand,
-    MissingRequiredFree,
+    MissingRequiredFree(String),
     UnexpectedArgument(String),
     UnexpectedSingleArgument(String, usize),
     UnexpectedFree(String),
@@ -499,8 +499,8 @@ impl Error {
     }
 
     /// Returns an error for a missing required free argument.
-    pub fn missing_required_free() -> Error {
-        Error{kind: ErrorKind::MissingRequiredFree}
+    pub fn missing_required_free<S: Into<String>>(arg: S) -> Error {
+        Error{kind: ErrorKind::MissingRequiredFree(arg.into())}
     }
 
     /// Returns an error when a free argument was encountered, but the options
@@ -549,7 +549,7 @@ impl fmt::Display for Error {
             MissingCommand => f.write_str("missing command name"),
             MissingRequired(opt) => write!(f, "missing required option `{}`", opt),
             MissingRequiredCommand => f.write_str("missing required command"),
-            MissingRequiredFree => f.write_str("missing required free argument"),
+            MissingRequiredFree(arg) => write!(f, "missing required argument for {}", arg),
             UnexpectedArgument(opt) => write!(f, "option `{}` does not accept an argument", opt),
             UnexpectedSingleArgument(opt, n) =>
                 write!(f, "option `{}` expects {} arguments; found 1", opt, n),
