@@ -383,8 +383,9 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
             if opts.required {
                 required.push(ident);
+                let name = format!("{}", ident);
                 required_err.push(quote!{
-                    ::gumdrop::Error::missing_required_free() });
+                    ::gumdrop::Error::missing_required_free(#name) });
             }
 
             free.push(FreeOpt{

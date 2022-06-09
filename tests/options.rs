@@ -913,7 +913,7 @@ fn test_required() {
     is_err!(Opts2::parse_args_default(EMPTY),
         "missing required command");
     is_err!(Opts3::parse_args_default(EMPTY),
-        "missing required free argument");
+        "missing required argument for bar");
 
     let opts = Opts::parse_args_default(&["-f", "1"]).unwrap();
     assert_eq!(opts.foo, 1);
