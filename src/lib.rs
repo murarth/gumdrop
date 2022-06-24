@@ -166,22 +166,37 @@
 //! }
 //! ```
 
+#![cfg_attr(feature = "staticvec", feature(const_option_ext))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
-#[cfg_attr(feature = "std", macro_use)]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[macro_use]
 extern crate alloc;
 
 pub use gumdrop_derive::*;
 
-#[cfg(feature="std")]
+#[cfg(feature = "std")]
 use std::error::Error as StdError;
+
 use core::fmt;
 use core::slice::Iter;
 use core::str::Chars;
 
-#[cfg(not(feature="std"))]
-use alloc::{string::String, format, borrow::ToOwned};
+use cfg_if::cfg_if;
+
+cfg_if! {
+    if #[cfg(feature="alloc")] {
+        use alloc::{string::String, string::ToString, format};
+    } else if #[cfg(feature="staticvec")] {
+        use staticvec::StaticString;
+
+        const GUMDROP_STRING_SIZE: usize = const_str::parse!(core::option_env!("GUMDROP_STRING_SIZE").unwrap_or("512"), usize);
+
+        #[doc(hidden)]
+        pub type String = StaticString<GUMDROP_STRING_SIZE>;
+    }
+}
 
 /// Represents an error encountered during argument parsing
 #[derive(Debug)]
@@ -192,12 +207,12 @@ pub struct Error {
 #[derive(Debug)]
 enum ErrorKind {
     FailedParse(String, String),
-    FailedParseDefault{
+    FailedParseDefault {
         option: &'static str,
         value: &'static str,
         err: String,
     },
-    InsufficientArguments{
+    InsufficientArguments {
         option: String,
         expected: usize,
         found: usize,
@@ -242,7 +257,9 @@ pub enum Opt<'a> {
 pub trait Options {
     /// Parses arguments until the given parser is exhausted or until
     /// an error is encountered.
-    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+    fn parse<S: AsRef<str>>(parser: &mut Parser<S>) -> Result<Self, Error>
+    where
+        Self: Sized;
 
     /// Returns the subcommand instance, if present.
     ///
@@ -259,19 +276,25 @@ pub trait Options {
     ///   `#[options(command)]`, this method is called on that value.
     ///   Otherwise, `None` is returned.
     /// * For `enum` types, the name corresponding to the variant is returned.
-    fn command_name(&self) -> Option<&'static str> { None }
+    fn command_name(&self) -> Option<&'static str> {
+        None
+    }
 
     /// Returns whether the user supplied a "help" option to request
     /// usage information about the program or any contained subcommands.
     ///
     /// The default implementation returns `false`.
-    fn help_requested(&self) -> bool { false }
+    fn help_requested(&self) -> bool {
+        false
+    }
 
     /// Parses arguments received from the command line.
     ///
     /// The first argument (the program name) should be omitted.
     fn parse_args<S: AsRef<str>>(args: &[S], style: ParsingStyle) -> Result<Self, Error>
-            where Self: Sized {
+    where
+        Self: Sized,
+    {
         Self::parse(&mut Parser::new(args, style))
     }
 
@@ -284,8 +307,11 @@ pub trait Options {
     /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
-    #[cfg(feature="std")]
-    fn parse_args_or_exit(style: ParsingStyle) -> Self where Self: Sized {
+    #[cfg(feature = "std")]
+    fn parse_args_or_exit(style: ParsingStyle) -> Self
+    where
+        Self: Sized,
+    {
         use std::env::args;
         use std::process::exit;
 
@@ -339,8 +365,11 @@ pub trait Options {
     /// `stderr` and the process will exit with status code `0`.
     ///
     /// Otherwise, the parsed options are returned.
-    #[cfg(feature="std")]
-    fn parse_args_default_or_exit() -> Self where Self: Sized {
+    #[cfg(feature = "std")]
+    fn parse_args_default_or_exit() -> Self
+    where
+        Self: Sized,
+    {
         Self::parse_args_or_exit(ParsingStyle::default())
     }
 
@@ -348,18 +377,25 @@ pub trait Options {
     /// using the default [parsing style](enum.ParsingStyle.html).
     ///
     /// The first argument (the program name) should be omitted.
-    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error> where Self: Sized {
+    fn parse_args_default<S: AsRef<str>>(args: &[S]) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
         Self::parse(&mut Parser::new(args, ParsingStyle::default()))
     }
 
     /// Parses options for the named command.
-    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+    fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error>
+    where
+        Self: Sized;
 
     /// Returns a string showing usage and help for each supported option.
     ///
     /// Option descriptions are separated by newlines. The returned string
     /// should **not** end with a newline.
-    fn usage() -> &'static str where Self: Sized;
+    fn usage() -> &'static str
+    where
+        Self: Sized;
 
     /// Returns a string showing usage and help for this options instance.
     ///
@@ -376,7 +412,9 @@ pub trait Options {
     ///
     /// Command descriptions are separated by newlines. The returned string
     /// should **not** end with a newline.
-    fn command_usage(command: &str) -> Option<&'static str> where Self: Sized;
+    fn command_usage(command: &str) -> Option<&'static str>
+    where
+        Self: Sized;
 
     /// Returns a string listing available commands and help text.
     ///
@@ -387,7 +425,9 @@ pub trait Options {
     ///
     /// For `struct` types containing a field marked `#[options(command)]`,
     /// `usage` is called on the command type.
-    fn command_list() -> Option<&'static str> where Self: Sized;
+    fn command_list() -> Option<&'static str>
+    where
+        Self: Sized;
 
     /// Returns a listing of available commands and help text.
     ///
@@ -450,34 +490,43 @@ pub enum ParsingStyle {
 impl Error {
     /// Returns an error for a failed attempt at parsing an option value.
     pub fn failed_parse(opt: Opt, err: String) -> Error {
-        Error{kind: ErrorKind::FailedParse(opt.to_string(), err)}
+        Error {
+            kind: ErrorKind::FailedParse(opt.to_string(), err),
+        }
     }
 
     /// Returns an error for a failed attempt at parsing an option's default value.
-    pub fn failed_parse_default(option: &'static str,
-            value: &'static str, err: String) -> Error {
-        Error{kind: ErrorKind::FailedParseDefault{option, value, err}}
+    pub fn failed_parse_default(option: &'static str, value: &'static str, err: String) -> Error {
+        Error {
+            kind: ErrorKind::FailedParseDefault { option, value, err },
+        }
     }
 
     /// Returns an error for a failed attempt at parsing an option value.
     pub fn failed_parse_with_name(name: String, err: String) -> Error {
-        Error{kind: ErrorKind::FailedParse(name, err)}
+        Error {
+            kind: ErrorKind::FailedParse(name, err),
+        }
     }
 
     /// Returns an error for an option expecting two or more arguments not
     /// receiving the expected number of arguments.
     pub fn insufficient_arguments(opt: Opt, expected: usize, found: usize) -> Error {
-        Error{kind: ErrorKind::InsufficientArguments{
-            option: opt.to_string(),
-            expected: expected,
-            found: found,
-        }}
+        Error {
+            kind: ErrorKind::InsufficientArguments {
+                option: opt.to_string(),
+                expected: expected,
+                found: found,
+            },
+        }
     }
 
     /// Returns an error for an option receiving an unexpected argument value,
     /// e.g. `--option=value`.
     pub fn unexpected_argument(opt: Opt) -> Error {
-        Error{kind: ErrorKind::UnexpectedArgument(opt.to_string())}
+        Error {
+            kind: ErrorKind::UnexpectedArgument(opt.to_string()),
+        }
     }
 
     /// Returns an error for an option expecting two or more argument values
@@ -485,63 +534,110 @@ impl Error {
     ///
     /// These options must be passed as, e.g. `--option value second-value [...]`.
     pub fn unexpected_single_argument(opt: Opt, n: usize) -> Error {
-        Error{kind: ErrorKind::UnexpectedSingleArgument(opt.to_string(), n)}
+        Error {
+            kind: ErrorKind::UnexpectedSingleArgument(opt.to_string(), n),
+        }
     }
 
     /// Returns an error for a missing required argument.
     pub fn missing_argument(opt: Opt) -> Error {
-        Error{kind: ErrorKind::MissingArgument(opt.to_string())}
+        Error {
+            kind: ErrorKind::MissingArgument(opt.to_string()),
+        }
     }
 
     /// Returns an error for a missing command name.
     pub fn missing_command() -> Error {
-        Error{kind: ErrorKind::MissingCommand}
+        Error {
+            kind: ErrorKind::MissingCommand,
+        }
     }
 
     /// Returns an error for a missing required option.
     pub fn missing_required(opt: &str) -> Error {
-        Error{kind: ErrorKind::MissingRequired(opt.to_owned())}
+        cfg_if! {
+            if #[cfg(any(feature = "std", feature = "alloc"))]  {
+                let str = opt.to_string();
+            } else {
+                let str = String::from_str(opt);
+            }
+        }
+        Error {
+            kind: ErrorKind::MissingRequired(str),
+        }
     }
 
     /// Returns an error for a missing required command.
     pub fn missing_required_command() -> Error {
-        Error{kind: ErrorKind::MissingRequiredCommand}
+        Error {
+            kind: ErrorKind::MissingRequiredCommand,
+        }
     }
 
     /// Returns an error for a missing required free argument.
     pub fn missing_required_free() -> Error {
-        Error{kind: ErrorKind::MissingRequiredFree}
+        Error {
+            kind: ErrorKind::MissingRequiredFree,
+        }
     }
 
     /// Returns an error when a free argument was encountered, but the options
     /// type does not support free arguments.
     pub fn unexpected_free(arg: &str) -> Error {
-        Error{kind: ErrorKind::UnexpectedFree(arg.to_owned())}
+        cfg_if! {
+            if #[cfg(any(feature = "std", feature = "alloc"))]  {
+                let str = arg.to_string();
+            } else {
+                let str = String::from_str(arg);
+            }
+        }
+        Error {
+            kind: ErrorKind::UnexpectedFree(str),
+        }
     }
 
     /// Returns an error for an unrecognized command.
     pub fn unrecognized_command(name: &str) -> Error {
-        Error{kind: ErrorKind::UnrecognizedCommand(name.to_owned())}
+        cfg_if! {
+            if #[cfg(any(feature = "std", feature = "alloc"))]  {
+                let str = name.to_string();
+            } else {
+                let str = String::from_str(name);
+            }
+        }
+        Error {
+            kind: ErrorKind::UnrecognizedCommand(str),
+        }
     }
 
     /// Returns an error for an unrecognized option.
     pub fn unrecognized_option(opt: Opt) -> Error {
         match opt {
             Opt::Short(short) => Error::unrecognized_short(short),
-            Opt::Long(long) | Opt::LongWithArg(long, _) =>
-                Error::unrecognized_long(long),
-            Opt::Free(_) => panic!("`Error::unrecognized_option` called with `Opt::Free` value")
+            Opt::Long(long) | Opt::LongWithArg(long, _) => Error::unrecognized_long(long),
+            Opt::Free(_) => panic!("`Error::unrecognized_option` called with `Opt::Free` value"),
         }
     }
 
     /// Returns an error for an unrecognized long option, e.g. `--option`.
     pub fn unrecognized_long(opt: &str) -> Error {
-        Error{kind: ErrorKind::UnrecognizedLongOption(opt.to_owned())}
+        cfg_if! {
+            if #[cfg(any(feature = "std", feature = "alloc"))]  {
+                let str = opt.to_string();
+            } else {
+                let str = String::from_str(opt);
+            }
+        }
+        Error {
+            kind: ErrorKind::UnrecognizedLongOption(str),
+        }
     }
 
     /// Returns an error for an unrecognized short option, e.g. `-o`.
     pub fn unrecognized_short(opt: char) -> Error {
-        Error{kind: ErrorKind::UnrecognizedShortOption(opt)}
+        Error {
+            kind: ErrorKind::UnrecognizedShortOption(opt),
+        }
     }
 }
 
@@ -551,18 +647,29 @@ impl fmt::Display for Error {
 
         match &self.kind {
             FailedParse(opt, arg) => write!(f, "invalid argument to option `{}`: {}", opt, arg),
-            FailedParseDefault{option, value, err} => write!(f, "invalid default value for `{}` ({:?}): {}", option, value, err),
-            InsufficientArguments{option, expected, found} =>
-                write!(f, "insufficient arguments to option `{}`: expected {}; found {}",
-                    option, expected, found),
+            FailedParseDefault { option, value, err } => write!(
+                f,
+                "invalid default value for `{}` ({:?}): {}",
+                option, value, err
+            ),
+            InsufficientArguments {
+                option,
+                expected,
+                found,
+            } => write!(
+                f,
+                "insufficient arguments to option `{}`: expected {}; found {}",
+                option, expected, found
+            ),
             MissingArgument(opt) => write!(f, "missing argument to option `{}`", opt),
             MissingCommand => f.write_str("missing command name"),
             MissingRequired(opt) => write!(f, "missing required option `{}`", opt),
             MissingRequiredCommand => f.write_str("missing required command"),
             MissingRequiredFree => f.write_str("missing required free argument"),
             UnexpectedArgument(opt) => write!(f, "option `{}` does not accept an argument", opt),
-            UnexpectedSingleArgument(opt, n) =>
-                write!(f, "option `{}` expects {} arguments; found 1", opt, n),
+            UnexpectedSingleArgument(opt, n) => {
+                write!(f, "option `{}` expects {} arguments; found 1", opt, n)
+            }
             UnexpectedFree(arg) => write!(f, "unexpected free argument `{}`", arg),
             UnrecognizedCommand(cmd) => write!(f, "unrecognized command `{}`", cmd),
             UnrecognizedLongOption(opt) => write!(f, "unrecognized option `--{}`", opt),
@@ -571,7 +678,7 @@ impl fmt::Display for Error {
     }
 }
 
-#[cfg(feature="std")]
+#[cfg(feature = "std")]
 impl StdError for Error {
     fn description(&self) -> &str {
         "failed to parse arguments"
@@ -584,7 +691,7 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
     /// The given slice should **not** contain the program name as its first
     /// element.
     pub fn new(args: &'a [S], style: ParsingStyle) -> Parser<'a, S> {
-        Parser{
+        Parser {
             args: args.iter(),
             cur: None,
             style: style,
@@ -616,13 +723,10 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
                 self.terminated = true;
                 self.args.next().map(|s| Opt::Free(s.as_ref()))
             }
-            Some(long) if long.starts_with("--") => {
-                match long.find('=') {
-                    Some(pos) => Some(Opt::LongWithArg(
-                        &long[2..pos], &long[pos + 1..])),
-                    None => Some(Opt::Long(&long[2..]))
-                }
-            }
+            Some(long) if long.starts_with("--") => match long.find('=') {
+                Some(pos) => Some(Opt::LongWithArg(&long[2..pos], &long[pos + 1..])),
+                None => Some(Opt::Long(&long[2..])),
+            },
             Some(short) if short.starts_with('-') => {
                 let mut chars = short[1..].chars();
 
@@ -637,7 +741,7 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
                 }
                 Some(Opt::Free(free))
             }
-            None => None
+            None => None,
         }
     }
 
@@ -657,7 +761,7 @@ impl<'a, S: 'a + AsRef<str>> Parser<'a, S> {
 
 impl<'a, S: 'a> Clone for Parser<'a, S> {
     fn clone(&self) -> Parser<'a, S> {
-        Parser{
+        Parser {
             args: self.args.clone(),
             cur: self.cur.clone(),
             style: self.style,
@@ -668,13 +772,29 @@ impl<'a, S: 'a> Clone for Parser<'a, S> {
 
 impl<'a> Opt<'a> {
     #[doc(hidden)]
+    #[cfg(any(feature = "std", feature = "alloc"))]
     pub fn to_string(&self) -> String {
         match *self {
             Opt::Short(ch) => format!("-{}", ch),
             Opt::Long(s) => format!("--{}", s),
             Opt::LongWithArg(opt, _) => format!("--{}", opt),
-            Opt::Free(_) => "free".to_owned()
+            Opt::Free(_) => "free".to_string(),
         }
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(feature = "staticvec"))]
+    pub fn to_string(&self) -> String {
+        use core::fmt::Write;
+
+        let mut str = String::new();
+        match *self {
+            Opt::Short(ch) => write!(str, "-{}", ch).unwrap(),
+            Opt::Long(s) => write!(str, "--{}", s).unwrap(),
+            Opt::LongWithArg(opt, _) => write!(str, "--{}", opt).unwrap(),
+            Opt::Free(_) => return String::from_str("free"),
+        }
+        str
     }
 }
 
@@ -713,7 +833,7 @@ pub fn parse_args_default<T: Options>(args: &[String]) -> Result<T, Error> {
 /// # Panics
 ///
 /// If any argument to the process is not valid unicode.
-#[cfg(feature="std")]
+#[cfg(feature = "std")]
 pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
     T::parse_args_or_exit(style)
 }
@@ -732,7 +852,7 @@ pub fn parse_args_or_exit<T: Options>(style: ParsingStyle) -> T {
 /// # Panics
 ///
 /// If any argument to the process is not valid unicode.
-#[cfg(feature="std")]
+#[cfg(feature = "std")]
 pub fn parse_args_default_or_exit<T: Options>() -> T {
     T::parse_args_default_or_exit()
 }
@@ -744,8 +864,18 @@ mod test {
 
     #[test]
     fn test_parser() {
-        let args = &["-a", "b", "-cde", "arg", "-xfoo", "--long", "--opt=val",
-            "--", "y", "-z"];
+        let args = &[
+            "-a",
+            "b",
+            "-cde",
+            "arg",
+            "-xfoo",
+            "--long",
+            "--opt=val",
+            "--",
+            "y",
+            "-z",
+        ];
 
         let mut p = Parser::new(args, ParsingStyle::AllOptions);
 
