@@ -15,11 +15,18 @@ license = "MIT/Apache-2.0"
 readme = "README.md"
 
 [features]
-default = []
+default = ["std"]
 default_expr = ["gumdrop_derive/default_expr"]
+std = ["gumdrop_derive/std"]
+alloc = ["gumdrop_derive/alloc"]
+staticvec = ["dep:staticvec", "gumdrop_derive/staticvec"]
 
 [dependencies]
+cfg-if = "1.0.0"
+const-str = "0.4.1"
+const_format = { version = "0.2.25", features = ["const_generics"] }
 gumdrop_derive = { version = "0.8.1", path = "gumdrop_derive" }
+staticvec = { version = "0.11.6", default-features = false, optional = true, git = "https://github.com/stevefan1999-personal/staticvec", branch = "patch-const_intrinsic_copy" }
 
 [dev-dependencies]
 assert_matches = "1.1"

@@ -20,8 +20,12 @@ proc-macro = true
 [features]
 default = []
 default_expr = ["syn/full"]
+std = []
+alloc = []
+staticvec = []
 
 [dependencies]
+cfg-if = "1.0.0"
 proc-macro2 = "1"
 quote = "1"
 syn = "1"
