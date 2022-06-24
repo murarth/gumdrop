@@ -812,6 +812,7 @@ struct AttrOpts {
     default: Option<String>,
     #[cfg(feature = "default_expr")]
     default_expr: Option<Expr>,
+    treat_as_vec: bool,
 
     command: bool,
 }
@@ -890,7 +891,7 @@ impl Action {
 
                 match &path.ident.to_string()[..] {
                     "bool" if opts.parse.is_none() => Action::Switch,
-                    "Vec" if !opts.no_multi && param.is_some() => {
+                    path if opts.treat_as_vec || (path.ends_with("Vec") && !opts.no_multi && param.is_some()) => {
                         let tuple_len = tuple_len(param.unwrap());
 
                         Action::Push(
@@ -1358,7 +1359,7 @@ impl FreeAction {
 
                 match &path.ident.to_string()[..] {
                     "Option" => FreeAction::SetOption,
-                    "Vec" if !opts.no_multi => {
+                    path if opts.treat_as_vec || (path.ends_with("Vec") && !opts.no_multi) => {
                         FreeAction::Push(Ident::new("push", Span::call_site()))
                     }
                     _ => {
