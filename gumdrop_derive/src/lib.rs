@@ -302,6 +302,52 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
     })
 }
 
+struct ArgSpecPart {
+    required: bool,
+    multiple: bool,
+}
+
+impl ArgSpecPart {
+    fn new(required: bool) -> Self {
+        Self {
+            required,
+            multiple: false,
+        }
+    }
+    fn update(&mut self, required: bool) {
+        if !self.required {
+            self.required = required;
+        }
+        self.multiple = true;
+    }
+}
+
+trait UpdateArgSpec {
+    fn update(&mut self, required: bool);
+}
+
+impl UpdateArgSpec for Option<ArgSpecPart> {
+    fn update(&mut self, required: bool) {
+        match self {
+            None => *self = Some(ArgSpecPart::new(required)),
+            Some(part) => part.update(required),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ArgSpec {
+    command: Option<ArgSpecPart>,
+    options: Option<ArgSpecPart>,
+    free: Option<ArgSpecPart>,
+}
+
+impl ArgSpec {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
 fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
         -> Result<TokenStream2, Error> {
     let mut pattern = Vec::new();
@@ -318,6 +364,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let mut options = Vec::new();
     let mut field_name = Vec::new();
     let mut default = Vec::new();
+    let mut arg_spec = ArgSpec::new();
 
     let default_expr = quote!{ ::std::default::Default::default() };
     let default_opts = DefaultOpts::parse(&ast.attrs)?;
@@ -364,6 +411,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             command_ty = Some(first_ty_param(&field.ty).unwrap_or(&field.ty));
             command_required = opts.required;
 
+            arg_spec.command.update(opts.required);
+
             if opts.required {
                 required.push(ident);
                 required_err.push(quote!{
@@ -386,6 +435,13 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                 }
             }
 
+            let action = FreeAction::infer(&field.ty, &opts);
+
+            arg_spec.free.update(opts.required);
+            if action.is_push() {
+                arg_spec.free.as_mut().unwrap().multiple = true;
+            }
+
             if opts.required {
                 required.push(ident);
                 required_err.push(quote!{
@@ -394,7 +450,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
 
             free.push(FreeOpt{
                 field: ident,
-                action: FreeAction::infer(&field.ty, &opts),
+                action,
                 parse: opts.parse.unwrap_or_default(),
                 required: opts.required,
                 help: opts.help.or(opts.doc),
@@ -436,6 +492,8 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
             return Err(Error::new(span,
                 "`meta` value is invalid for this field"));
         }
+
+        arg_spec.options.update(opts.required);
 
         options.push(Opt{
             field: ident,
@@ -513,7 +571,29 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let name = &ast.ident;
     let opts_help = default_opts.help.or(default_opts.doc);
     let usage = make_usage(&opts_help, &free, &options);
-    let arg_spec = default_opts.arg_spec.as_deref().unwrap_or("[OPTIONS]");
+    let arg_spec = default_opts.arg_spec.unwrap_or_else(|| {
+        let mut spec = String::new();
+        let mut push = |part: Option<ArgSpecPart>, name: &'_ str| match part {
+            None => (),
+            Some(part) => {
+                let mut str = name.to_string();
+                if part.multiple {
+                    str = format!("{str}S...");
+                }
+                if !part.required {
+                    str = format!("[{str}]");
+                }
+                spec.push_str(format!("{str} ").as_str());
+            }
+        };
+        push(arg_spec.command, "COMMAND");
+        push(arg_spec.options, "OPTION");
+        push(arg_spec.free, "ARG");
+        if !spec.is_empty() {
+            spec.pop();
+        }
+        spec
+    });
 
     let handle_free = if !free.is_empty() {
         let catch_all = if free.last().unwrap().action.is_push() {
