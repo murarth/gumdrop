@@ -170,6 +170,7 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
     let mut help_req_impl = Vec::new();
     let mut variant = Vec::new();
     let usage = make_cmd_usage(&commands);
+    let arg_spec = "[OPTIONS]";
 
     for cmd in commands {
         command.push(cmd.name);
@@ -268,6 +269,10 @@ fn derive_options_enum(ast: &DeriveInput, data: &DataEnum)
                 };
 
                 ::std::result::Result::Ok(cmd)
+            }
+
+            fn argument_spec() -> &'static str {
+                #arg_spec
             }
 
             fn usage() -> &'static str {
@@ -508,6 +513,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let name = &ast.ident;
     let opts_help = default_opts.help.or(default_opts.doc);
     let usage = make_usage(&opts_help, &free, &options);
+    let arg_spec = "[OPTIONS]";
 
     let handle_free = if !free.is_empty() {
         let catch_all = if free.last().unwrap().action.is_push() {
@@ -723,6 +729,10 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
                     -> ::std::result::Result<Self, ::gumdrop::Error> {
                 ::std::result::Result::Err(
                     ::gumdrop::Error::unrecognized_command(name))
+            }
+
+            fn argument_spec() -> &'static str {
+                #arg_spec
             }
 
             fn usage() -> &'static str {
