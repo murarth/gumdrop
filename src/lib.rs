@@ -304,7 +304,7 @@ pub trait Options {
                 }
             }
 
-            eprintln!("Usage: {}{} [OPTIONS]", args[0], command_str);
+            eprintln!("Usage: {}{} {}", args[0], command_str, Self::argument_spec());
             eprintln!();
             eprintln!("{}", command.self_usage());
 
@@ -344,6 +344,11 @@ pub trait Options {
 
     /// Parses options for the named command.
     fn parse_command<S: AsRef<str>>(name: &str, parser: &mut Parser<S>) -> Result<Self, Error> where Self: Sized;
+
+    /// Returns a string showing the argument specification.
+    ///
+    /// The returned strings should **not** end with a newline.
+    fn argument_spec() -> &'static str where Self: Sized;
 
     /// Returns a string showing usage and help for each supported option.
     ///
