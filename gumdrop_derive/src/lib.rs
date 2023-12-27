@@ -513,7 +513,7 @@ fn derive_options_struct(ast: &DeriveInput, fields: &Fields)
     let name = &ast.ident;
     let opts_help = default_opts.help.or(default_opts.doc);
     let usage = make_usage(&opts_help, &free, &options);
-    let arg_spec = "[OPTIONS]";
+    let arg_spec = default_opts.arg_spec.as_deref().unwrap_or("[OPTIONS]");
 
     let handle_free = if !free.is_empty() {
         let catch_all = if free.last().unwrap().action.is_push() {
@@ -819,6 +819,7 @@ struct DefaultOpts {
     required: bool,
     doc: Option<String>,
     help: Option<String>,
+    arg_spec: Option<String>,
 }
 
 enum FreeAction {
@@ -1270,8 +1271,12 @@ impl DefaultOpts {
                     },
                     Meta::NameValue(nv) => {
                         match nv.path.get_ident() {
-                           Some(ident) if ident.to_string() == "help" => self.help = Some(lit_str(&nv.lit)?),
-                            _ => return Err(unexpected_meta_item(nv.path.span()))
+                            Some(ident) => match ident.to_string().as_str() {
+                                "help" => self.help = Some(lit_str(&nv.lit)?),
+                                "arg_spec" => self.arg_spec = Some(lit_str(&nv.lit)?),
+                                _ => return Err(unexpected_meta_item(ident.span()))
+                            }
+                            None => return Err(unexpected_meta_item(nv.path.span()))
                         }
                     }
                     Meta::List(list) =>
